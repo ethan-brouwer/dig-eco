@@ -1,17 +1,30 @@
 // Setup
-var region = ee.FeatureCollection("FAO/GAUL/2015/level1")
-  .filter(ee.Filter.eq("ADM1_NAME", "Cabanas"))
-  .filter(ee.Filter.eq("ADM0_NAME", "El Salvador"));
+var gaul1 = ee.FeatureCollection('FAO/GAUL/2015/level1');
+var cOnly = gaul1
+  .filter(ee.Filter.eq('ADM0_NAME', 'El Salvador'))
+  .filter(ee.Filter.eq('ADM1_NAME', 'Cabanas'));
+var roi = cOnly.geometry();
+Map.centerObject(roi, 10);
 
-// Landsat 2 imagery
-var landsat2 = ee.ImageCollection("LANDSAT/LM02/C02/T1")
-  .filterDate("1975-01-01", "1977-12-31")
-  .filterBounds(region)
-  .median();
+// Latest 4 months of Sentinel-2 SR
+var end = ee.Date(Date.now());
+var start = end.advance(-4, 'month');
 
-// NDVI mask
-var ndvi = landsat2.normalizedDifference(["B4", "B2"]).rename("NDVI");
-var ndviMask = ndvi.gt(0.3);
+function maskS2(img) {
+  var scl = img.select('SCL');
+  var mask = scl.neq(3).and(scl.neq(8)).and(scl.neq(9)).and(scl.neq(10)).and(scl.neq(11));
+  return img.updateMask(mask);
+}
 
-Map.centerObject(region, 9);
-Map.addLayer(ndvi.updateMask(ndviMask), {min: 0, max: 1}, "NDVI mask");
+var s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+  .filterBounds(roi)
+  .filterDate(start, end)
+  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 60))
+  .map(maskS2)
+  .median()
+  .clip(roi);
+
+// NDVI layer
+var ndvi = s2.normalizedDifference(['B8', 'B4']).rename('NDVI');
+Map.addLayer(ndvi, {min: 0, max: 0.8, palette: ['brown', 'yellow', 'green']}, 'NDVI (last 4 months)');
+Map.addLayer(roi, {color: 'white'}, 'Cabanas boundary', false);
