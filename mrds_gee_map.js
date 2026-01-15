@@ -49,15 +49,20 @@ function safeGetString(f, field, fallback) {
   return ee.Algorithms.If(val, ee.String(val), fallback);
 }
 
+function normalizeKey(s) {
+  return ee.String(s).trim().toLowerCase();
+}
+
 // ================= POINT STYLING =================
 var styledPoints = mrds.map(function (f) {
   var commodRaw = ee.String(safeGetString(f, commodityField, "unknown"));
-  var commodKey = commodRaw.toLowerCase();
+  var commodKey = normalizeKey(commodRaw);
   var color = commodityColors.get(commodKey, "00FF00");
   return f.set("style", {
     color: color,
     pointSize: 6,
-    width: 1
+    width: 1,
+    commod_norm: commodKey
   });
 });
 
@@ -70,13 +75,6 @@ var buffers = mrds.map(function (f) {
       buffer_m: bufferMeters,
       source: "USGS_MRDS"
     });
-});
-
-// ================= LABELS =================
-var labels = mrds.map(function (f) {
-  var name = ee.String(safeGetString(f, nameField, "Unnamed"));
-  var commod = ee.String(safeGetString(f, commodityField, "Unknown"));
-  return f.set("label", name.cat(" | ").cat(commod));
 });
 
 // ================= ADD TO MAP =================
@@ -96,17 +94,46 @@ Map.addLayer(
   "MRDS buffers (200 m)"
 );
 
-Map.addLayer(
-  labels.style({
-    pointSize: 0,
-    labelProperty: "label",
-    fontSize: 10,
-    textColor: "FFFFFF"
-  }),
-  {},
-  "Site labels",
-  false
-);
+// ================= LEGEND =================
+var legend = ui.Panel({
+  style: {
+    position: "top-left",
+    padding: "8px 10px"
+  }
+});
+
+legend.add(ui.Label({
+  value: "MRDS commodities (count)",
+  style: {fontWeight: "bold", fontSize: "12px"}
+}));
+
+// Count features per normalized commodity
+var counts = styledPoints.aggregate_histogram("commod_norm");
+var keys = counts.keys().sort();
+
+keys.evaluate(function (kList) {
+  kList.forEach(function (k) {
+    var color = commodityColors.get(k, "00FF00");
+    var count = counts.get(k);
+    count.evaluate(function (c) {
+      var row = ui.Panel({
+        layout: ui.Panel.Layout.Flow("horizontal"),
+        style: {margin: "0 0 4px 0"}
+      });
+      row.add(ui.Label({
+        style: {
+          backgroundColor: "#" + color.getInfo(),
+          padding: "6px",
+          margin: "0 6px 0 0"
+        }
+      }));
+      row.add(ui.Label(k + " (" + c + ")"));
+      legend.add(row);
+    });
+  });
+});
+
+Map.add(legend);
 
 // ================= USER NOTE =================
 print(
