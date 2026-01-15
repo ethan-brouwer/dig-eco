@@ -1,0 +1,6 @@
+## main...origin/main
+ M README.md
+?? docs/status/audits/20260115T222113Z-python-scaffold/
+?? pyproject.toml
+?? src/
+?? tests/

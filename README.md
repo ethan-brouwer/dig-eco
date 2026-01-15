@@ -3,14 +3,14 @@
 ## What this repo is
 A minimal repository bootstrapped from zero using the Work Contract pattern.
 
-## The workflow (Human -> ChatGPT -> Codex)
-- Human defines intent, constraints, and acceptance.
-- ChatGPT produces a canonical step packet (allowlist + commands + full file contents).
-- Codex executes the packet, captures evidence, and produces one commit.
+## Local dev (Python 3.11)
+Create a local venv and run tools from it:
+- `python3.11 -m venv .venv`
+- `.venv/bin/python -m pip install -U pip`
+- `.venv/bin/python -m pip install ruff pytest`
+- Tests: `.venv/bin/python -m pytest`
+- Lint: `.venv/bin/python -m ruff check .`
+- Format check: `.venv/bin/python -m ruff format --check .`
 
 ## Status & evidence
 Audit artifacts live under `docs/status/audits/<STEP_ID>/`.
-
-## How to continue
-Use the Work Contract packet structure for every change:
-intent -> allowlist -> execution -> evidence -> one commit.
