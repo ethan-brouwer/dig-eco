@@ -13,9 +13,13 @@
 */
 
 // ================= USER INPUT =================
-// Import the MRDS KML manually in the GEE Code Editor
+// Import the MRDS CSV/KML manually in the GEE Code Editor
 // and update the asset path below.
 var mrds = ee.FeatureCollection("users/your-username/USGS_MRDS_ElSalvador");
+
+// CSV field names (edit to match your import)
+var nameField = "name";
+var commodityField = "commod1";
 
 // ================= PARAMETERS =================
 var bufferMeters = 200;
@@ -26,23 +30,30 @@ Map.setOptions("SATELLITE");
 
 // ================= COMMODITY COLOR MAP =================
 var commodityColors = ee.Dictionary({
-  "Gold": "FFD700",
-  "Gold, Silver": "FFD700",
-  "Silver, Gold": "FFD700",
-  "Silver": "1E90FF",
-  "Copper": "FF4500",
-  "Lead": "8A2BE2",
-  "Zinc": "00CED1",
-  "Iron": "B22222",
-  "Sulfur": "FFFF66",
-  "Sulfur-Pyrite": "FFFF66",
-  "Perlite": "A9A9A9"
+  "gold": "FFD700",
+  "gold, silver": "FFD700",
+  "silver, gold": "FFD700",
+  "silver": "1E90FF",
+  "copper": "FF4500",
+  "lead": "8A2BE2",
+  "zinc": "00CED1",
+  "iron": "B22222",
+  "sulfur": "FFFF66",
+  "sulfur-pyrite": "FFFF66",
+  "perlite": "A9A9A9"
 });
+
+// ================= HELPERS =================
+function safeGetString(f, field, fallback) {
+  var val = f.get(field);
+  return ee.Algorithms.If(val, ee.String(val), fallback);
+}
 
 // ================= POINT STYLING =================
 var styledPoints = mrds.map(function (f) {
-  var commod = ee.String(f.get("commod1"));
-  var color = commodityColors.get(commod, "00FF00");
+  var commodRaw = ee.String(safeGetString(f, commodityField, "unknown"));
+  var commodKey = commodRaw.toLowerCase();
+  var color = commodityColors.get(commodKey, "00FF00");
   return f.set("style", {
     color: color,
     pointSize: 6,
@@ -63,8 +74,8 @@ var buffers = mrds.map(function (f) {
 
 // ================= LABELS =================
 var labels = mrds.map(function (f) {
-  var name = ee.String(f.get("name", "Unnamed"));
-  var commod = ee.String(f.get("commod1", "Unknown"));
+  var name = ee.String(safeGetString(f, nameField, "Unnamed"));
+  var commod = ee.String(safeGetString(f, commodityField, "Unknown"));
   return f.set("label", name.cat(" | ").cat(commod));
 });
 
