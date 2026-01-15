@@ -15,7 +15,7 @@
 // ================= USER INPUT =================
 // Import the MRDS CSV/KML manually in the GEE Code Editor
 // and update the asset path below.
-var mrds = ee.FeatureCollection("users/your-username/USGS_MRDS_ElSalvador");
+var mrds = ee.FeatureCollection("projects/metalminingpersonalcopy/assets/USGS_MRDS");
 
 // CSV field names (edit to match your import)
 var nameField = "name";
