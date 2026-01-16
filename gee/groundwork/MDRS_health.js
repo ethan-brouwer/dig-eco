@@ -169,7 +169,7 @@ function buildMonthlyCollection() {
       return monthComposite(y, m);
     });
   }).flatten();
-  images = images.filter(ee.Filter.notNull(["date"]));
+  images = ee.List(images).filter(ee.Filter.notNull(["item"]));
   return ee.ImageCollection.fromImages(images);
 }
 
