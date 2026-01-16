@@ -149,15 +149,18 @@ function monthComposite(year, month) {
   var start = ee.Date.fromYMD(year, month, 1);
   var end = start.advance(1, "month");
   var monthCol = baseCollection.filterDate(start, end);
-  return ee.Algorithms.If(
+  var empty = ee.Image().select([]);
+  var comp = ee.Image(ee.Algorithms.If(
     monthCol.size().gt(0),
-    monthCol.median().set({
-      year: year,
-      month: month,
-      date: start.format("YYYY-MM")
-    }),
-    null
-  );
+    monthCol.median(),
+    empty
+  ));
+  return comp.set({
+    has_data: monthCol.size().gt(0),
+    year: year,
+    month: month,
+    date: start.format("YYYY-MM")
+  });
 }
 
 function buildMonthlyCollection() {
@@ -169,8 +172,8 @@ function buildMonthlyCollection() {
       return monthComposite(y, m);
     });
   }).flatten();
-  images = ee.List(images).filter(ee.Filter.notNull(["item"]));
-  return ee.ImageCollection.fromImages(images);
+  return ee.ImageCollection.fromImages(images)
+    .filter(ee.Filter.eq("has_data", 1));
 }
 
 var monthly = buildMonthlyCollection();
