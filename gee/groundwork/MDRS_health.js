@@ -20,8 +20,8 @@ var descField = "description";
 var xField = "X";
 var yField = "Y";
 
-var startDate = "2015-01-01";
-var endDate = ee.Date(Date.now());
+var startYear = 2015;
+var endYear = ee.Date(Date.now()).get("year");
 var dryMonths = [11, 12, 1, 2, 3, 4];
 var cloudMax = 60;
 
@@ -61,11 +61,6 @@ function maskLandsatL2(img) {
   var cloud = qa.bitwiseAnd(1 << 3).neq(0);
   var shadow = qa.bitwiseAnd(1 << 4).neq(0);
   return img.updateMask(cloud.or(shadow).not());
-}
-
-function addMonth(img) {
-  var m = ee.Date(img.get("system:time_start")).get("month");
-  return img.set("month", m);
 }
 
 function addIndices(img) {
@@ -135,15 +130,12 @@ var analysisMask = urbanMask.and(waterMask);
 var l8 = ee.ImageCollection(L8_ID);
 var l9 = ee.ImageCollection(L9_ID);
 
-var collection = l8.merge(l9)
+var baseCollection = l8.merge(l9)
   .filterBounds(elsal)
-  .filterDate(startDate, endDate)
   .filter(ee.Filter.lt("CLOUD_COVER", cloudMax))
   .map(scaleL2)
   .map(maskLandsatL2)
   .map(addIndices)
-  .map(addMonth)
-  .filter(ee.Filter.inList("month", dryMonths))
   .map(function (img) {
     return img.updateMask(analysisMask);
   });
@@ -153,8 +145,35 @@ var indexBands = [
   "BSI", "SAVI", "IOI", "KAOLINITE", "CLAY", "FERROUS"
 ];
 
+function monthComposite(year, month) {
+  var start = ee.Date.fromYMD(year, month, 1);
+  var end = start.advance(1, "month");
+  return baseCollection
+    .filterDate(start, end)
+    .median()
+    .set({
+      year: year,
+      month: month,
+      date: start.format("YYYY-MM")
+    });
+}
+
+function buildMonthlyCollection() {
+  var years = ee.List.sequence(startYear, endYear);
+  var months = ee.List(dryMonths);
+  var images = years.map(function (y) {
+    y = ee.Number(y);
+    return months.map(function (m) {
+      return monthComposite(y, m);
+    });
+  }).flatten();
+  return ee.ImageCollection.fromImages(images);
+}
+
+var monthly = buildMonthlyCollection();
+
 function buildSeries(geom) {
-  return ee.FeatureCollection(collection.map(function (img) {
+  return ee.FeatureCollection(monthly.map(function (img) {
     var stats = img.select(indexBands).reduceRegion({
       reducer: ee.Reducer.mean(),
       geometry: geom,
@@ -163,7 +182,7 @@ function buildSeries(geom) {
       maxPixels: 1e9
     });
     return ee.Feature(null, stats).set({
-      date: img.date().format("YYYY-MM-dd")
+      date: img.get("date")
     });
   }));
 }
@@ -185,7 +204,8 @@ function normalizeSeries(fc) {
       var val = ee.Number(f.get(b));
       var min = ee.Number(mins.get(b));
       var max = ee.Number(maxs.get(b));
-      var norm = val.subtract(min).divide(max.subtract(min));
+      var denom = max.subtract(min);
+      var norm = ee.Algorithms.If(denom.neq(0), val.subtract(min).divide(denom), 0);
       return ee.List([b, norm]);
     }).flatten());
     return f.set(props);
@@ -207,11 +227,11 @@ var selector = ui.Select({
       xProperty: "date",
       yProperties: indexBands
     }).setOptions({
-      title: name + " (dry season indices, normalized)",
+      title: name + " (dry season monthly medians, normalized)",
       lineWidth: 1,
       pointSize: 2,
       vAxis: {title: "Normalized value"},
-      hAxis: {title: "Date"}
+      hAxis: {title: "Year-Month"}
     });
 
     chartPanel.clear();
@@ -226,4 +246,5 @@ chartPanel.add(selector);
 Map.add(chartPanel);
 
 // Optional clipped layers for a selected buffer
-// Map.addLayer(ndvi.clip(geom), {min: 0, max: 0.8, palette: ["brown", "yellow", "green"]}, "NDVI (buffer)");
+// var exampleSite = ee.Feature(mrds.first()).geometry().buffer(bufferMeters);
+// Map.addLayer(monthly.first().select("NDVI").clip(exampleSite), {min: 0, max: 0.8, palette: ["brown", "yellow", "green"]}, "NDVI (buffer)");
