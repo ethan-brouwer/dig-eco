@@ -1,16 +1,29 @@
 # dig-eco
 
-## What this repo is
-A minimal repository bootstrapped from zero using the Work Contract pattern.
+## Overview
+dig-eco is a collaborative research codebase for remote sensing analysis of artisanal and small-scale mining (ASM) and associated turbidity and water-quality impacts. The repository emphasizes reproducibility, transparent methods, and research-grade workflows suitable for publication.
 
-## Local dev (Python 3.11)
-Create a local venv and run tools from it:
-- `python3.11 -m venv .venv`
-- `.venv/bin/python -m pip install -U pip`
-- `.venv/bin/python -m pip install ruff pytest`
-- Tests: `.venv/bin/python -m pytest`
-- Lint: `.venv/bin/python -m ruff check .`
-- Format check: `.venv/bin/python -m ruff format --check .`
+## Goals
+- Remote sensing classification of ASM
+- Turbidity and water-quality analysis associated with mining
+- Modular, scalable classification workflows
+- Transparent version history and reproducible science
+- Designed for collaboration, expansion, and publication
 
-## Status & evidence
-Audit artifacts live under `docs/status/audits/<STEP_ID>/`.
+## Repository structure
+- `gee/`: Google Earth Engine workflows (ASM, turbidity, shared utilities)
+- `docs/`: project documentation, methodology, and literature summaries
+- `data/`: raw, processed, and reference data staging
+- `analysis/`: notebooks and figures
+- `tests/`: test scaffolding
+
+## Collaboration
+- Branches: `main` (stable), `dev` (integration), `feature/<short-description>`
+- No direct commits to `main`
+- All changes via pull request
+
+## Contributors
+- Ethan Brouwer
+
+## Citation
+See `CITATION.cff`.
