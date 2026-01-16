@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this repository, please cite it."
+title: "dig-eco"
+version: 0.1.0
+authors:
+  - family-names: Brouwer
+    given-names: Ethan
+date-released: 2026-01-16
+license: MIT
+repository-code: "https://github.com/ethan-brouwer/dig-eco"
