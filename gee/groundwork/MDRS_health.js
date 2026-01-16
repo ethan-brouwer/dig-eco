@@ -198,12 +198,12 @@ function normalizeSeries(fc) {
   var mins = ee.Dictionary(bandList.map(function (b) {
     b = ee.String(b);
     return ee.List([b, fc.aggregate_min(b)]);
-  }));
+  }).flatten());
 
   var maxs = ee.Dictionary(bandList.map(function (b) {
     b = ee.String(b);
     return ee.List([b, fc.aggregate_max(b)]);
-  }));
+  }).flatten());
 
   return fc.map(function (f) {
     var props = ee.Dictionary(bandList.map(function (b) {
@@ -214,7 +214,7 @@ function normalizeSeries(fc) {
       var denom = max.subtract(min);
       var norm = ee.Algorithms.If(denom.neq(0), val.subtract(min).divide(denom), 0);
       return ee.List([b, norm]);
-    }));
+    }).flatten());
     return f.set(props);
   });
 }
