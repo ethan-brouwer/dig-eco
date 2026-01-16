@@ -12,7 +12,7 @@ var L9_ID = "LANDSAT/LC09/C02/T1_L2";
 var GAUL0_ID = "FAO/GAUL/2015/level0";
 var GAUL1_ID = "FAO/GAUL/2015/level1";
 var WC_ID = "ESA/WorldCover/v200/2021";
-var JRC_ID = "JRC/GSW1_4/Occurrence";
+var JRC_ID = "JRC/GSW1_4/GlobalSurfaceWater";
 
 var mrdsTable = ee.FeatureCollection("projects/metalminingpersonalcopy/assets/USGS_MRDS");
 var nameField = "Name";
@@ -123,7 +123,7 @@ Map.addLayer(mrds.style({color: "FFAA00", pointSize: 6}), {}, "MRDS sites");
 
 var worldcover = ee.Image(WC_ID);
 var urbanMask = worldcover.neq(50);
-var waterOcc = ee.Image(JRC_ID).gte(70);
+var waterOcc = ee.Image(JRC_ID).select("occurrence").gte(70);
 var waterMask = waterOcc.not();
 var analysisMask = urbanMask.and(waterMask);
 
