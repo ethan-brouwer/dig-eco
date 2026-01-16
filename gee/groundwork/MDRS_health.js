@@ -46,8 +46,8 @@ var departments = ee.FeatureCollection(GAUL1_ID)
 
 Map.setOptions("SATELLITE");
 Map.centerObject(elsal, 8);
-// Map.addLayer(elsal.style({color: "FFFFFF", width: 2, fillColor: "00000000"}), {}, "El Salvador");
-// Map.addLayer(departments.style({color: "00FFFF", width: 1, fillColor: "00000000"}), {}, "Departments");
+Map.addLayer(elsal.style({color: "FFFFFF", width: 2, fillColor: "00000000"}), {}, "El Salvador");
+Map.addLayer(departments.style({color: "00FFFF", width: 1, fillColor: "00000000"}), {}, "Departments", false);
 
 function scaleL2(img) {
   var scaled = img.select([
@@ -119,7 +119,7 @@ var buffers = mrds.map(function (f) {
 });
 
 Map.addLayer(buffers.style({color: "FFFFFF", width: 2, fillColor: "00000000"}), {}, "MRDS buffers (1 km)", false);
-Map.addLayer(mrds.style({color: "FFAA00", pointSize: 6}), {}, "MRDS sites", false);
+Map.addLayer(mrds.style({color: "FFAA00", pointSize: 6}), {}, "MRDS sites");
 
 var worldcover = ee.Image(WC_ID);
 var urbanMask = worldcover.neq(50);
@@ -188,18 +188,19 @@ function buildSeries(geom) {
 }
 
 function normalizeSeries(fc) {
-  var mins = ee.Dictionary(indexBands.map(function (b) {
+  var bandList = ee.List(indexBands);
+  var mins = ee.Dictionary(bandList.map(function (b) {
     b = ee.String(b);
     return ee.List([b, fc.aggregate_min(b)]);
-  }).flatten());
+  }));
 
-  var maxs = ee.Dictionary(indexBands.map(function (b) {
+  var maxs = ee.Dictionary(bandList.map(function (b) {
     b = ee.String(b);
     return ee.List([b, fc.aggregate_max(b)]);
-  }).flatten());
+  }));
 
   return fc.map(function (f) {
-    var props = ee.Dictionary(indexBands.map(function (b) {
+    var props = ee.Dictionary(bandList.map(function (b) {
       b = ee.String(b);
       var val = ee.Number(f.get(b));
       var min = ee.Number(mins.get(b));
@@ -207,7 +208,7 @@ function normalizeSeries(fc) {
       var denom = max.subtract(min);
       var norm = ee.Algorithms.If(denom.neq(0), val.subtract(min).divide(denom), 0);
       return ee.List([b, norm]);
-    }).flatten());
+    }));
     return f.set(props);
   });
 }
