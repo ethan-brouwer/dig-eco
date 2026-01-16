@@ -50,9 +50,9 @@ function addIndices(img) {
   return img.addBands([ndvi, bsi, ndwi, ndbi, ioi, kaolinite, gndvi]);
 }
 
-function monthFilter(img) {
+function addMonth(img) {
   var m = ee.Date(img.get("system:time_start")).get("month");
-  return ee.List(months).contains(m);
+  return img.set("month", m);
 }
 
 var l8 = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2");
@@ -62,9 +62,10 @@ var collection = l8.merge(l9)
   .filterBounds(elsal)
   .filterDate(startDate, endDate)
   .filter(ee.Filter.lt("CLOUD_COVER", cloudMax))
-  .filter(monthFilter)
   .map(maskLandsatL2)
-  .map(addIndices);
+  .map(addIndices)
+  .map(addMonth)
+  .filter(ee.Filter.inList("month", months));
 
 var composite = collection.median().clip(elsal);
 
