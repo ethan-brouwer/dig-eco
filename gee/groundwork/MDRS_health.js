@@ -148,14 +148,16 @@ var indexBands = [
 function monthComposite(year, month) {
   var start = ee.Date.fromYMD(year, month, 1);
   var end = start.advance(1, "month");
-  return baseCollection
-    .filterDate(start, end)
-    .median()
-    .set({
+  var monthCol = baseCollection.filterDate(start, end);
+  return ee.Algorithms.If(
+    monthCol.size().gt(0),
+    monthCol.median().set({
       year: year,
       month: month,
       date: start.format("YYYY-MM")
-    });
+    }),
+    null
+  );
 }
 
 function buildMonthlyCollection() {
@@ -167,6 +169,7 @@ function buildMonthlyCollection() {
       return monthComposite(y, m);
     });
   }).flatten();
+  images = images.filter(ee.Filter.notNull(["date"]));
   return ee.ImageCollection.fromImages(images);
 }
 
