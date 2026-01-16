@@ -214,7 +214,7 @@ function normalizeSeries(fc) {
 
 var chartPanel = ui.Panel({style: {position: "bottom-right", width: "420px"}});
 var selector = ui.Select({
-  items: mrds.aggregate_array(nameField).distinct(),
+  items: [],
   placeholder: "Select site",
   onChange: function (name) {
     var site = mrds.filter(ee.Filter.eq(nameField, name)).first();
@@ -239,6 +239,10 @@ var selector = ui.Select({
     chartPanel.add(ui.Label("Dry season: Nov–Apr (Feb often most stable)"));
     chartPanel.add(chart);
   }
+});
+
+mrds.aggregate_array(nameField).distinct().evaluate(function (names) {
+  selector.items().reset(names);
 });
 
 chartPanel.add(ui.Label("MRDS site selector"));
