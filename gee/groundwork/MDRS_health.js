@@ -195,26 +195,28 @@ function buildSeries(geom) {
 
 function normalizeSeries(fc) {
   var bandList = ee.List(indexBands);
-  var mins = ee.Dictionary(bandList.map(function (b) {
+  var minList = bandList.map(function (b) {
     b = ee.String(b);
-    return ee.List([b, fc.aggregate_min(b)]);
-  }).flatten());
+    return fc.aggregate_min(b);
+  });
+  var maxList = bandList.map(function (b) {
+    b = ee.String(b);
+    return fc.aggregate_max(b);
+  });
 
-  var maxs = ee.Dictionary(bandList.map(function (b) {
-    b = ee.String(b);
-    return ee.List([b, fc.aggregate_max(b)]);
-  }).flatten());
+  var mins = ee.Dictionary.fromLists(bandList, minList);
+  var maxs = ee.Dictionary.fromLists(bandList, maxList);
 
   return fc.map(function (f) {
-    var props = ee.Dictionary(bandList.map(function (b) {
+    var normList = bandList.map(function (b) {
       b = ee.String(b);
       var val = ee.Number(f.get(b));
       var min = ee.Number(mins.get(b));
       var max = ee.Number(maxs.get(b));
       var denom = max.subtract(min);
-      var norm = ee.Algorithms.If(denom.neq(0), val.subtract(min).divide(denom), 0);
-      return ee.List([b, norm]);
-    }).flatten());
+      return ee.Algorithms.If(denom.neq(0), val.subtract(min).divide(denom), 0);
+    });
+    var props = ee.Dictionary.fromLists(bandList, normList);
     return f.set(props);
   });
 }
