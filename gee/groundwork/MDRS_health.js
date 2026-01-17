@@ -210,9 +210,10 @@ function normalizeSeries(fc) {
   return fc.map(function (f) {
     var normList = bandList.map(function (b) {
       b = ee.String(b);
-      var val = ee.Number(f.get(b));
-      var min = ee.Number(mins.get(b));
-      var max = ee.Number(maxs.get(b));
+      var raw = f.get(b);
+      var val = ee.Number(ee.Algorithms.If(raw, raw, 0));
+      var min = ee.Number(ee.Algorithms.If(mins.get(b), mins.get(b), 0));
+      var max = ee.Number(ee.Algorithms.If(maxs.get(b), maxs.get(b), 0));
       var denom = max.subtract(min);
       return ee.Algorithms.If(denom.neq(0), val.subtract(min).divide(denom), 0);
     });
