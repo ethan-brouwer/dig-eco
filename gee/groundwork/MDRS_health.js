@@ -110,7 +110,9 @@ function safeNumber(value, fallback) {
 }
 
 function parseCoord(value) {
-  return ee.Number.parse(ee.String(value));
+  var s = ee.String(value);
+  var hasNum = s.match("^-?\\d+(\\.\\d+)?$").size().gt(0);
+  return ee.Algorithms.If(hasNum, ee.Number.parse(s), null);
 }
 
 var mrdsClean = mrdsTable
@@ -118,13 +120,21 @@ var mrdsClean = mrdsTable
   .filter(ee.Filter.neq(xField, ""))
   .filter(ee.Filter.neq(yField, ""));
 
-var mrds = mrdsClean.map(function (f) {
+var mrdsParsed = mrdsClean.map(function (f) {
   var x = parseCoord(f.get(xField));
   var y = parseCoord(f.get(yField));
-  var geom = ee.Geometry.Point([x, y]);
+  var valid = ee.Algorithms.IsEqual(x, null).not()
+    .and(ee.Algorithms.IsEqual(y, null).not());
+  var safeX = ee.Number(ee.Algorithms.If(valid, x, 0));
+  var safeY = ee.Number(ee.Algorithms.If(valid, y, 0));
+  var geom = ee.Geometry.Point([safeX, safeY]);
   var commod = extractCommodity(f.get(descField));
-  return ee.Feature(geom, f.toDictionary()).set("commod1", commod);
+  return ee.Feature(geom, f.toDictionary())
+    .set("commod1", commod)
+    .set("valid_coord", valid);
 });
+
+var mrds = mrdsParsed.filter(ee.Filter.eq("valid_coord", 1));
 
 var bufferMeters = 1000;
 var buffers = mrds.map(function (f) {
@@ -170,26 +180,33 @@ function drySeasonCollection(year) {
   return withMonth.filter(monthsFilter);
 }
 
-function buildYearlyCollection() {
+function buildMonthlyCollection() {
   var years = ee.List.sequence(startYear, endYear);
-  var images = years.map(function (y) {
+  var yearMonths = years.map(function (y) {
     y = ee.Number(y);
-    var col = drySeasonCollection(y);
-    var comp = ee.Image(ee.Algorithms.If(col.size().gt(0), col.mean(), ee.Image().select([])));
-    return comp.set({
-      has_data: col.size().gt(0),
-      year: y,
-      date: ee.Date.fromYMD(y, 1, 1).format("YYYY")
+    var perMonth = ee.List(dryMonths).map(function (m) {
+      m = ee.Number(m);
+      var col = drySeasonCollection(y)
+        .filter(ee.Filter.eq("month", m));
+      var comp = ee.Image(ee.Algorithms.If(col.size().gt(0), col.mean(), ee.Image().select([])));
+      var monthLabel = ee.String(m.format()).padStart(2, "0");
+      return comp.set({
+        has_data: col.size().gt(0),
+        year: y,
+        month: m,
+        date: ee.String(y.format()).cat("-").cat(monthLabel)
+      });
     });
-  });
-  return ee.ImageCollection.fromImages(images)
+    return perMonth;
+  }).flatten();
+  return ee.ImageCollection.fromImages(yearMonths)
     .filter(ee.Filter.eq("has_data", 1));
 }
 
-var yearly = buildYearlyCollection();
+var monthly = buildMonthlyCollection();
 
 function buildSeries(geom) {
-  return ee.FeatureCollection(yearly.map(function (img) {
+  return ee.FeatureCollection(monthly.map(function (img) {
     var stats = img.select(indexBands).reduceRegion({
       reducer: ee.Reducer.mean(),
       geometry: geom,
@@ -225,7 +242,7 @@ function normalizeSeries(fc) {
   });
 }
 
-var chartPanel = ui.Panel({style: {position: "bottom-right", width: "460px"}});
+var chartPanel = ui.Panel({style: {position: "bottom-right", width: "520px"}});
 var selector = ui.Select({
   items: [],
   placeholder: "Select site",
@@ -240,11 +257,12 @@ var selector = ui.Select({
       xProperty: "date",
       yProperties: indexBands
     }).setOptions({
-      title: name + " (dry season yearly means, normalized)",
+      title: name + " (dry season monthly means, normalized)",
       lineWidth: 2,
-      pointSize: 4,
+      pointSize: 3,
+      hAxis: {title: "Year-Month", slantedText: true, slantedTextAngle: 45},
       vAxis: {title: "Normalized value", gridlines: {count: 5}},
-      hAxis: {title: "Year"}
+      legend: {position: "right"}
     });
 
     chartPanel.clear();
@@ -264,4 +282,4 @@ Map.add(chartPanel);
 
 // Optional clipped layers for a selected buffer
 // var exampleSite = ee.Feature(mrds.first()).geometry().buffer(bufferMeters);
-// Map.addLayer(yearly.first().select("NDVI").clip(exampleSite), {min: 0, max: 0.8, palette: ["brown", "yellow", "green"]}, "NDVI (buffer)");
+// Map.addLayer(monthly.first().select("NDVI").clip(exampleSite), {min: 0, max: 0.8, palette: ["brown", "yellow", "green"]}, "NDVI (buffer)");
