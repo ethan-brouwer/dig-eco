@@ -105,9 +105,22 @@ function extractCommodity(desc) {
   return ee.Algorithms.If(m.size().gt(1), ee.String(m.get(1)), "unknown");
 }
 
-var mrds = mrdsTable.map(function (f) {
-  var x = ee.Number(f.get(xField));
-  var y = ee.Number(f.get(yField));
+function safeNumber(value, fallback) {
+  return ee.Number(ee.Algorithms.If(ee.Algorithms.IsEqual(value, null), fallback, value));
+}
+
+function parseCoord(value) {
+  return ee.Number.parse(ee.String(value));
+}
+
+var mrdsClean = mrdsTable
+  .filter(ee.Filter.notNull([xField, yField]))
+  .filter(ee.Filter.neq(xField, ""))
+  .filter(ee.Filter.neq(yField, ""));
+
+var mrds = mrdsClean.map(function (f) {
+  var x = parseCoord(f.get(xField));
+  var y = parseCoord(f.get(yField));
   var geom = ee.Geometry.Point([x, y]);
   var commod = extractCommodity(f.get(descField));
   return ee.Feature(geom, f.toDictionary()).set("commod1", commod);
@@ -144,10 +157,6 @@ var indexBands = [
   "NDVI", "GNDVI", "NDWI", "MNDWI", "NDMI", "NDBI", "NDTI",
   "BSI", "SAVI", "IOI", "KAOLINITE", "CLAY", "FERROUS"
 ];
-
-function safeNumber(value, fallback) {
-  return ee.Number(ee.Algorithms.If(ee.Algorithms.IsEqual(value, null), fallback, value));
-}
 
 function drySeasonCollection(year) {
   var yearStart = ee.Date.fromYMD(year, 1, 1);
