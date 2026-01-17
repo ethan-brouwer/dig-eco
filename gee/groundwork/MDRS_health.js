@@ -197,11 +197,13 @@ function normalizeSeries(fc) {
   var bandList = ee.List(indexBands);
   var minList = bandList.map(function (b) {
     b = ee.String(b);
-    return fc.aggregate_min(b);
+    var raw = fc.aggregate_min(b);
+    return ee.Algorithms.If(ee.Algorithms.IsEqual(raw, null), 0, raw);
   });
   var maxList = bandList.map(function (b) {
     b = ee.String(b);
-    return fc.aggregate_max(b);
+    var raw = fc.aggregate_max(b);
+    return ee.Algorithms.If(ee.Algorithms.IsEqual(raw, null), 0, raw);
   });
 
   var mins = ee.Dictionary.fromLists(bandList, minList);
@@ -211,7 +213,7 @@ function normalizeSeries(fc) {
     var normList = bandList.map(function (b) {
       b = ee.String(b);
       var raw = f.get(b);
-      var val = ee.Number(ee.Algorithms.If(raw, raw, 0));
+      var val = ee.Number(ee.Algorithms.If(ee.Algorithms.IsEqual(raw, null), 0, raw));
       var min = ee.Number(ee.Algorithms.If(mins.get(b), mins.get(b), 0));
       var max = ee.Number(ee.Algorithms.If(maxs.get(b), maxs.get(b), 0));
       var denom = max.subtract(min);
