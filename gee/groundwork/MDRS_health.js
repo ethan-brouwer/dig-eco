@@ -145,6 +145,10 @@ var indexBands = [
   "BSI", "SAVI", "IOI", "KAOLINITE", "CLAY", "FERROUS"
 ];
 
+function safeNumber(value, fallback) {
+  return ee.Number(ee.Algorithms.If(ee.Algorithms.IsEqual(value, null), fallback, value));
+}
+
 function drySeasonCollection(year) {
   var yearStart = ee.Date.fromYMD(year, 1, 1);
   var yearEnd = ee.Date.fromYMD(year + 1, 1, 1);
@@ -192,22 +196,22 @@ function buildSeries(geom) {
 
 function normalizeSeries(fc) {
   var bandList = ee.List(indexBands);
-  var maxList = bandList.map(function (b) {
+  var maxs = ee.Dictionary(bandList.iterate(function (b, acc) {
     b = ee.String(b);
     var raw = fc.aggregate_max(b);
-    return ee.Algorithms.If(ee.Algorithms.IsEqual(raw, null), 1, raw);
-  });
-  var maxs = ee.Dictionary.fromLists(bandList, maxList);
+    var maxVal = safeNumber(raw, 1);
+    return ee.Dictionary(acc).set(b, maxVal);
+  }, ee.Dictionary({})));
 
   return fc.map(function (f) {
-    var normList = bandList.map(function (b) {
+    var props = ee.Dictionary(bandList.iterate(function (b, acc) {
       b = ee.String(b);
       var raw = f.get(b);
-      var val = ee.Number(ee.Algorithms.If(ee.Algorithms.IsEqual(raw, null), 0, raw));
-      var max = ee.Number(maxs.get(b));
-      return ee.Algorithms.If(max.neq(0), val.divide(max), 0);
-    });
-    var props = ee.Dictionary.fromLists(bandList, normList);
+      var val = safeNumber(raw, 0);
+      var maxVal = safeNumber(maxs.get(b), 1);
+      var norm = ee.Algorithms.If(maxVal.neq(0), val.divide(maxVal), 0);
+      return ee.Dictionary(acc).set(b, norm);
+    }, ee.Dictionary({})));
     return f.set(props);
   });
 }
