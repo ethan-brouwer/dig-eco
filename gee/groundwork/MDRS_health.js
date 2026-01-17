@@ -123,8 +123,11 @@ var mrdsClean = mrdsTable
 var mrdsParsed = mrdsClean.map(function (f) {
   var x = parseCoord(f.get(xField));
   var y = parseCoord(f.get(yField));
-  var valid = ee.Algorithms.Not(ee.Algorithms.IsEqual(x, null))
-    .and(ee.Algorithms.Not(ee.Algorithms.IsEqual(y, null)));
+  var invalid = ee.Algorithms.Or(
+    ee.Algorithms.IsEqual(x, null),
+    ee.Algorithms.IsEqual(y, null)
+  );
+  var valid = ee.Algorithms.If(invalid, 0, 1);
   var safeX = ee.Number(ee.Algorithms.If(valid, x, 0));
   var safeY = ee.Number(ee.Algorithms.If(valid, y, 0));
   var geom = ee.Geometry.Point([safeX, safeY]);
