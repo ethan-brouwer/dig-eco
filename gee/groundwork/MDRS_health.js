@@ -4,7 +4,7 @@
   INPUTS: Landsat 8/9 L2, MRDS CSV asset, GAUL boundaries, WorldCover, JRC water.
   OUTPUTS: Per-site normalized index charts and optional clipped map layers.
   AUTHOR: Ethan Brouwer
-  LAST MODIFIED: 2026-01-16
+  LAST MODIFIED: 2026-01-17
 */
 
 var L8_ID = "LANDSAT/LC08/C02/T1_L2";
@@ -145,41 +145,38 @@ var indexBands = [
   "BSI", "SAVI", "IOI", "KAOLINITE", "CLAY", "FERROUS"
 ];
 
-function monthComposite(year, month) {
-  var start = ee.Date.fromYMD(year, month, 1);
-  var end = start.advance(1, "month");
-  var monthCol = baseCollection.filterDate(start, end);
-  var empty = ee.Image().select([]);
-  var comp = ee.Image(ee.Algorithms.If(
-    monthCol.size().gt(0),
-    monthCol.median(),
-    empty
-  ));
-  return comp.set({
-    has_data: monthCol.size().gt(0),
-    year: year,
-    month: month,
-    date: start.format("YYYY-MM")
+function drySeasonCollection(year) {
+  var yearStart = ee.Date.fromYMD(year, 1, 1);
+  var yearEnd = ee.Date.fromYMD(year + 1, 1, 1);
+  var inYear = baseCollection.filterDate(yearStart, yearEnd);
+  var monthsFilter = ee.Filter.inList("month", dryMonths);
+  var withMonth = inYear.map(function (img) {
+    var m = img.date().get("month");
+    return img.set("month", m);
   });
+  return withMonth.filter(monthsFilter);
 }
 
-function buildMonthlyCollection() {
+function buildYearlyCollection() {
   var years = ee.List.sequence(startYear, endYear);
-  var months = ee.List(dryMonths);
   var images = years.map(function (y) {
     y = ee.Number(y);
-    return months.map(function (m) {
-      return monthComposite(y, m);
+    var col = drySeasonCollection(y);
+    var comp = ee.Image(ee.Algorithms.If(col.size().gt(0), col.mean(), ee.Image().select([])));
+    return comp.set({
+      has_data: col.size().gt(0),
+      year: y,
+      date: ee.Date.fromYMD(y, 1, 1).format("YYYY")
     });
-  }).flatten();
+  });
   return ee.ImageCollection.fromImages(images)
     .filter(ee.Filter.eq("has_data", 1));
 }
 
-var monthly = buildMonthlyCollection();
+var yearly = buildYearlyCollection();
 
 function buildSeries(geom) {
-  return ee.FeatureCollection(monthly.map(function (img) {
+  return ee.FeatureCollection(yearly.map(function (img) {
     var stats = img.select(indexBands).reduceRegion({
       reducer: ee.Reducer.mean(),
       geometry: geom,
@@ -195,18 +192,11 @@ function buildSeries(geom) {
 
 function normalizeSeries(fc) {
   var bandList = ee.List(indexBands);
-  var minList = bandList.map(function (b) {
-    b = ee.String(b);
-    var raw = fc.aggregate_min(b);
-    return ee.Algorithms.If(ee.Algorithms.IsEqual(raw, null), 0, raw);
-  });
   var maxList = bandList.map(function (b) {
     b = ee.String(b);
     var raw = fc.aggregate_max(b);
-    return ee.Algorithms.If(ee.Algorithms.IsEqual(raw, null), 0, raw);
+    return ee.Algorithms.If(ee.Algorithms.IsEqual(raw, null), 1, raw);
   });
-
-  var mins = ee.Dictionary.fromLists(bandList, minList);
   var maxs = ee.Dictionary.fromLists(bandList, maxList);
 
   return fc.map(function (f) {
@@ -214,17 +204,15 @@ function normalizeSeries(fc) {
       b = ee.String(b);
       var raw = f.get(b);
       var val = ee.Number(ee.Algorithms.If(ee.Algorithms.IsEqual(raw, null), 0, raw));
-      var min = ee.Number(ee.Algorithms.If(mins.get(b), mins.get(b), 0));
-      var max = ee.Number(ee.Algorithms.If(maxs.get(b), maxs.get(b), 0));
-      var denom = max.subtract(min);
-      return ee.Algorithms.If(denom.neq(0), val.subtract(min).divide(denom), 0);
+      var max = ee.Number(maxs.get(b));
+      return ee.Algorithms.If(max.neq(0), val.divide(max), 0);
     });
     var props = ee.Dictionary.fromLists(bandList, normList);
     return f.set(props);
   });
 }
 
-var chartPanel = ui.Panel({style: {position: "bottom-right", width: "420px"}});
+var chartPanel = ui.Panel({style: {position: "bottom-right", width: "460px"}});
 var selector = ui.Select({
   items: [],
   placeholder: "Select site",
@@ -239,11 +227,11 @@ var selector = ui.Select({
       xProperty: "date",
       yProperties: indexBands
     }).setOptions({
-      title: name + " (dry season monthly medians, normalized)",
-      lineWidth: 1,
-      pointSize: 2,
-      vAxis: {title: "Normalized value"},
-      hAxis: {title: "Year-Month"}
+      title: name + " (dry season yearly means, normalized)",
+      lineWidth: 2,
+      pointSize: 4,
+      vAxis: {title: "Normalized value", gridlines: {count: 5}},
+      hAxis: {title: "Year"}
     });
 
     chartPanel.clear();
@@ -263,4 +251,4 @@ Map.add(chartPanel);
 
 // Optional clipped layers for a selected buffer
 // var exampleSite = ee.Feature(mrds.first()).geometry().buffer(bufferMeters);
-// Map.addLayer(monthly.first().select("NDVI").clip(exampleSite), {min: 0, max: 0.8, palette: ["brown", "yellow", "green"]}, "NDVI (buffer)");
+// Map.addLayer(yearly.first().select("NDVI").clip(exampleSite), {min: 0, max: 0.8, palette: ["brown", "yellow", "green"]}, "NDVI (buffer)");
