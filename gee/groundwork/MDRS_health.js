@@ -60,7 +60,8 @@ function maskLandsatL2(img) {
   var qa = img.select("QA_PIXEL");
   var cloud = qa.bitwiseAnd(1 << 3).neq(0);
   var shadow = qa.bitwiseAnd(1 << 4).neq(0);
-  return img.updateMask(cloud.or(shadow).not());
+  var clear = cloud.or(shadow).eq(0);
+  return img.updateMask(clear);
 }
 
 function addIndices(img) {
@@ -150,7 +151,7 @@ Map.addLayer(mrds.style({color: "FFAA00", pointSize: 6}), {}, "MRDS sites");
 var worldcover = ee.Image(WC_ID);
 var urbanMask = worldcover.neq(50);
 var waterOcc = ee.Image(JRC_ID).select("occurrence").gte(70);
-var waterMask = waterOcc.not();
+var waterMask = waterOcc.eq(0);
 var analysisMask = urbanMask.and(waterMask);
 
 var l8 = ee.ImageCollection(L8_ID);
