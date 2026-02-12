@@ -34,8 +34,7 @@ var cfg = {
   singleSiteName: null,   // exact match to Name field
   sitePartitionCount: 1,  // set >1 to split sites into partitions
   sitePartitionIndex: 0,  // 0-based partition index
-  computeTrend: false,    // enable after base export is stable
-  exportWide: false,      // wide table is heavier than long table
+  exportPerYear: true,    // strongly recommended for memory safety
 
   // Seasonal compositing window (El Salvador default: dry season Nov-Apr)
   seasonStartMonth: 11,
@@ -324,24 +323,8 @@ function classifyNdvi(ndvi) {
   return ndvi.addBands([ndviClass, miningSoil, nonMiningSoil]);
 }
 
-var annualImagesBase = ee.ImageCollection.fromImages(
-  analysisYears().map(function (y) {
-    var comp = annualComposite(y);
-    var ndvi = comp.select("NDVI");
-    var classed = classifyNdvi(ndvi);
-    return comp.addBands(classed.select(["ndvi_class", "mining_soil", "non_mining_soil"]), null, true);
-  })
-);
-
-var annualImages = ee.ImageCollection(
-  ee.Algorithms.If(
-    cfg.includeYearsWithNoImages,
-    annualImagesBase,
-    annualImagesBase.filter(ee.Filter.gt("image_count", 0))
-  )
-);
-
-print("Annual composites built:", annualImages.size());
+var years = analysisYears();
+print("Configured year count:", years.size());
 
 // ---------------------------------------------------------------------------
 // 5) ZONAL STATS PER SITE x YEAR x BUFFER
@@ -428,142 +411,56 @@ function perFeatureYearStats(feature, annualImg) {
   });
 }
 
-var longStats = ee.FeatureCollection(annualImages.map(function (img) {
-  img = ee.Image(img);
-  return siteBuffers.map(function (f) {
-    return perFeatureYearStats(f, img);
+function buildStatsForYear(year) {
+  year = ee.Number(year);
+  var comp = annualComposite(year);
+  var classed = classifyNdvi(comp.select("NDVI"));
+  var fullImg = comp.addBands(classed.select(["ndvi_class", "mining_soil", "non_mining_soil"]), null, true);
+  var count = ee.Number(fullImg.get("image_count"));
+
+  var perYear = siteBuffers.map(function (f) {
+    return perFeatureYearStats(f, fullImg);
   });
-})).flatten();
 
-// ---------------------------------------------------------------------------
-// 6) TREND + DISTURBANCE/RECOVERY PROXIES
-// ---------------------------------------------------------------------------
-function addNullTrendFields(row) {
-  return row.set({
-    ndvi_trend_slope: null,
-    disturbance_score: null,
-    recovery_score: null
-  });
+  return ee.FeatureCollection(ee.Algorithms.If(
+    cfg.includeYearsWithNoImages,
+    perYear,
+    ee.Algorithms.If(count.gt(0), perYear, ee.FeatureCollection([]))
+  ));
 }
 
-var longWithTrend = ee.FeatureCollection(ee.Algorithms.If(
-  cfg.computeTrend,
-  ee.FeatureCollection(
-    ee.List(longStats.aggregate_array("site_buffer_key")).distinct().map(function (key) {
-      var subset = longStats.filter(ee.Filter.eq("site_buffer_key", key));
-      var subsetValid = subset.filter(ee.Filter.notNull(["year", "mean_ndvi"]));
-      var fit = subsetValid.reduceColumns({
-        reducer: ee.Reducer.linearFit(),
-        selectors: ["year", "mean_ndvi"]
+function scopeTag() {
+  function clean(s) {
+    return String(s).replace(/[^A-Za-z0-9_]+/g, "_").slice(0, 40);
+  }
+  if (cfg.singleSiteName !== null) {
+    return "site_" + clean(cfg.singleSiteName);
+  }
+  if (cfg.singleSiteId !== null) {
+    return "siteid_" + clean(cfg.singleSiteId);
+  }
+  if (cfg.sitePartitionCount > 1) {
+    return "part_" + clean(cfg.sitePartitionIndex) + "_of_" + clean(cfg.sitePartitionCount);
+  }
+  return "all_sites";
+}
+
+if (cfg.exportPerYear) {
+  years.evaluate(function (yearList) {
+    var tag = scopeTag();
+    yearList.forEach(function (year) {
+      var fc = buildStatsForYear(year);
+      var y = String(year);
+      var name = cfg.exportPrefixLong + "_" + tag + "_" + y;
+      Export.table.toDrive({
+        collection: fc,
+        description: name,
+        folder: cfg.exportFolder,
+        fileNamePrefix: name,
+        fileFormat: "CSV"
       });
-      var slope = ee.Number(ee.Algorithms.If(subsetValid.size().gt(1), fit.get("scale"), 0));
-
-      return subset.map(function (row) {
-        var barePct = ee.Number(row.get("bare_pct"));
-        var vegPct = ee.Number(row.get("non_mining_soil_pct"));
-        var decline = slope.min(0).abs();
-        var increase = slope.max(0);
-
-        var disturbanceScore = barePct.multiply(0.7).add(decline.multiply(100).multiply(0.3));
-        var recoveryScore = vegPct.multiply(0.7).add(increase.multiply(100).multiply(0.3));
-
-        return row.set({
-          ndvi_trend_slope: slope,
-          disturbance_score: disturbanceScore,
-          recovery_score: recoveryScore
-        });
-      });
-    })
-  ).flatten(),
-  longStats.map(addNullTrendFields)
-));
-
-// ---------------------------------------------------------------------------
-// 7) WIDE TABLE (site x year with separate 1 km and 2 km columns)
-// ---------------------------------------------------------------------------
-function maybeGet(featureObj, prop) {
-  return ee.Algorithms.If(
-    ee.Algorithms.IsEqual(featureObj, null),
-    null,
-    ee.Feature(featureObj).get(prop)
-  );
-}
-
-function maybeGetEither(primaryFeatureObj, fallbackFeatureObj, prop) {
-  return ee.Algorithms.If(
-    ee.Algorithms.IsEqual(primaryFeatureObj, null),
-    maybeGet(fallbackFeatureObj, prop),
-    ee.Feature(primaryFeatureObj).get(prop)
-  );
-}
-
-var wideStats = ee.FeatureCollection(ee.Algorithms.If(
-  cfg.exportWide,
-  ee.FeatureCollection(ee.List(longWithTrend.aggregate_array("site_year_key")).distinct().map(function (key) {
-    var perYear = longWithTrend.filter(ee.Filter.eq("site_year_key", key));
-    var row1k = perYear.filter(ee.Filter.eq("buffer_m", cfg.buffersM[0])).first();
-    var row2k = perYear.filter(ee.Filter.eq("buffer_m", cfg.buffersM[1])).first();
-
-    return ee.Feature(null, {
-      site_id: maybeGetEither(row1k, row2k, "site_id"),
-      site_name: maybeGetEither(row1k, row2k, "site_name"),
-      prod_stage: maybeGetEither(row1k, row2k, "prod_stage"),
-      commodities: maybeGetEither(row1k, row2k, "commodities"),
-      year: maybeGetEither(row1k, row2k, "year"),
-
-      mean_ndvi_1km: maybeGet(row1k, "mean_ndvi"),
-      mean_ndvi_2km: maybeGet(row2k, "mean_ndvi"),
-      median_ndvi_1km: maybeGet(row1k, "median_ndvi"),
-      median_ndvi_2km: maybeGet(row2k, "median_ndvi"),
-      ndvi_sd_1km: maybeGet(row1k, "ndvi_sd"),
-      ndvi_sd_2km: maybeGet(row2k, "ndvi_sd"),
-      valid_px_pct_1km: maybeGet(row1k, "valid_px_pct"),
-      valid_px_pct_2km: maybeGet(row2k, "valid_px_pct"),
-
-      bare_pct_1km: maybeGet(row1k, "bare_pct"),
-      bare_pct_2km: maybeGet(row2k, "bare_pct"),
-      area_bare_ha_1km: maybeGet(row1k, "area_bare_ha"),
-      area_bare_ha_2km: maybeGet(row2k, "area_bare_ha"),
-      area_sparse_ha_1km: maybeGet(row1k, "area_sparse_ha"),
-      area_sparse_ha_2km: maybeGet(row2k, "area_sparse_ha"),
-      area_veg_ha_1km: maybeGet(row1k, "area_veg_ha"),
-      area_veg_ha_2km: maybeGet(row2k, "area_veg_ha"),
-
-      ndvi_trend_slope_1km: maybeGet(row1k, "ndvi_trend_slope"),
-      ndvi_trend_slope_2km: maybeGet(row2k, "ndvi_trend_slope"),
-      disturbance_score_1km: maybeGet(row1k, "disturbance_score"),
-      disturbance_score_2km: maybeGet(row2k, "disturbance_score"),
-      recovery_score_1km: maybeGet(row1k, "recovery_score"),
-      recovery_score_2km: maybeGet(row2k, "recovery_score"),
-
-      topo_correction_applied: cfg.applyTopoCorrection
     });
-  })),
-  ee.FeatureCollection([])
-));
-
-// ---------------------------------------------------------------------------
-// 8) DEBUG PRINTS + EXPORTS
-// ---------------------------------------------------------------------------
-print("Long table preview:", longWithTrend.limit(5));
-if (cfg.exportWide) {
-  print("Wide table preview:", wideStats.limit(5));
-}
-
-Export.table.toDrive({
-  collection: longWithTrend,
-  description: cfg.exportPrefixLong,
-  folder: cfg.exportFolder,
-  fileNamePrefix: cfg.exportPrefixLong,
-  fileFormat: "CSV"
-});
-
-if (cfg.exportWide) {
-  Export.table.toDrive({
-    collection: wideStats,
-    description: cfg.exportPrefixWide,
-    folder: cfg.exportFolder,
-    fileNamePrefix: cfg.exportPrefixWide,
-    fileFormat: "CSV"
+    print("Per-year export tasks queued:", yearList.length);
+    print("Scope tag:", tag);
   });
 }
