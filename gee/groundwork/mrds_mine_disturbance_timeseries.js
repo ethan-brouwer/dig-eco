@@ -66,6 +66,9 @@ var L9 = "LANDSAT/LC09/C02/T1_L2";
 
 var reflectanceMult = 0.0000275;
 var reflectanceAdd = -0.2;
+var targetBands = ["blue", "green", "red", "nir", "swir1", "swir2"];
+var l57Bands = ["SR_B1", "SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B7"];
+var l89Bands = ["SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6", "SR_B7"];
 
 // ---------------------------------------------------------------------------
 // 2) STUDY AREA + MRDS INGEST
@@ -160,14 +163,6 @@ Map.addLayer(buffers2k.style({color: "FF00FF", width: 1, fillColor: "00000000"})
 // ---------------------------------------------------------------------------
 // 3) LANDSAT PREPROCESSING
 // ---------------------------------------------------------------------------
-function scaleReflectance(img) {
-  var scaled = img.select([
-    "SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6", "SR_B7"
-  ]).multiply(reflectanceMult).add(reflectanceAdd)
-    .rename(["blue", "green", "red", "nir", "swir1", "swir2"]);
-  return img.addBands(scaled, null, true);
-}
-
 function maskLandsatL2(img) {
   var qa = img.select("QA_PIXEL");
   var fill = qa.bitwiseAnd(1 << 0).neq(0);
@@ -228,21 +223,25 @@ function addNdvi(img) {
   return img.addBands(ndvi);
 }
 
-function standardizeLandsat(colId) {
+function standardizeLandsatByBands(colId, sourceBands) {
   return ee.ImageCollection(colId)
     .filter(ee.Filter.lt("CLOUD_COVER", cfg.cloudCoverMax))
-    .map(scaleReflectance)
     .map(maskLandsatL2)
-    .select(["blue", "green", "red", "nir", "swir1", "swir2"]);
+    .map(function (img) {
+      var optical = img.select(sourceBands, targetBands)
+        .multiply(reflectanceMult)
+        .add(reflectanceAdd);
+      return img.addBands(optical, null, true).select(targetBands);
+    });
 }
 
 var dem = ee.Image(cfg.demAsset);
 var terrain = getTerrainProducts(dem);
 
-var landsatBase = standardizeLandsat(L5)
-  .merge(standardizeLandsat(L7))
-  .merge(standardizeLandsat(L8))
-  .merge(standardizeLandsat(L9))
+var landsatBase = standardizeLandsatByBands(L5, l57Bands)
+  .merge(standardizeLandsatByBands(L7, l57Bands))
+  .merge(standardizeLandsatByBands(L8, l89Bands))
+  .merge(standardizeLandsatByBands(L9, l89Bands))
   .filterBounds(elsal);
 
 var landsatPrepared = landsatBase
