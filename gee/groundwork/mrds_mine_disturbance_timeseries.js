@@ -29,6 +29,13 @@ var cfg = {
   includeCurrentPartialYear: false,
   includeYearsWithNoImages: false,
 
+  // Memory controls
+  singleSiteId: null,     // e.g. "12345" for one-site debugging
+  siteBatchSize: 25,      // set null to run all sites at once
+  siteBatchIndex: 0,      // 0-based batch index
+  computeTrend: false,    // enable after base export is stable
+  exportWide: false,      // wide table is heavier than long table
+
   // Seasonal compositing window (El Salvador default: dry season Nov-Apr)
   seasonStartMonth: 11,
   seasonEndMonth: 4,
@@ -144,6 +151,21 @@ var mrds = mrdsRaw
 
 Map.addLayer(mrds.style({color: "FFAA00", pointSize: 5}), {}, "MRDS sites");
 print("MRDS sites in El Salvador:", mrds.size());
+
+function applySiteScope(fc) {
+  if (cfg.singleSiteId !== null) {
+    return fc.filter(ee.Filter.eq("site_id", cfg.singleSiteId));
+  }
+  if (cfg.siteBatchSize !== null) {
+    var sorted = fc.sort("site_id");
+    var start = cfg.siteBatchSize * cfg.siteBatchIndex;
+    return ee.FeatureCollection(sorted.toList(cfg.siteBatchSize, start));
+  }
+  return fc;
+}
+
+mrds = applySiteScope(mrds);
+print("MRDS sites after scope:", mrds.size());
 
 function makeBuffers(fc, distanceM) {
   return fc.map(function (f) {
@@ -422,35 +444,45 @@ var longStats = ee.FeatureCollection(annualImages.map(function (img) {
 // ---------------------------------------------------------------------------
 // 6) TREND + DISTURBANCE/RECOVERY PROXIES
 // ---------------------------------------------------------------------------
-var uniqueSiteBufferKeys = ee.List(longStats.aggregate_array("site_buffer_key")).distinct();
-
-function trendRowsForKey(key) {
-  var subset = longStats.filter(ee.Filter.eq("site_buffer_key", key));
-  var subsetValid = subset.filter(ee.Filter.notNull(["year", "mean_ndvi"]));
-  var fit = subsetValid.reduceColumns({
-    reducer: ee.Reducer.linearFit(),
-    selectors: ["year", "mean_ndvi"]
-  });
-  var slope = ee.Number(ee.Algorithms.If(subsetValid.size().gt(1), fit.get("scale"), 0));
-
-  return subset.map(function (row) {
-    var barePct = ee.Number(row.get("bare_pct"));
-    var vegPct = ee.Number(row.get("non_mining_soil_pct"));
-    var decline = slope.min(0).abs();
-    var increase = slope.max(0);
-
-    var disturbanceScore = barePct.multiply(0.7).add(decline.multiply(100).multiply(0.3));
-    var recoveryScore = vegPct.multiply(0.7).add(increase.multiply(100).multiply(0.3));
-
-    return row.set({
-      ndvi_trend_slope: slope,
-      disturbance_score: disturbanceScore,
-      recovery_score: recoveryScore
-    });
+function addNullTrendFields(row) {
+  return row.set({
+    ndvi_trend_slope: null,
+    disturbance_score: null,
+    recovery_score: null
   });
 }
 
-var longWithTrend = ee.FeatureCollection(uniqueSiteBufferKeys.map(trendRowsForKey)).flatten();
+var longWithTrend = ee.FeatureCollection(ee.Algorithms.If(
+  cfg.computeTrend,
+  ee.FeatureCollection(
+    ee.List(longStats.aggregate_array("site_buffer_key")).distinct().map(function (key) {
+      var subset = longStats.filter(ee.Filter.eq("site_buffer_key", key));
+      var subsetValid = subset.filter(ee.Filter.notNull(["year", "mean_ndvi"]));
+      var fit = subsetValid.reduceColumns({
+        reducer: ee.Reducer.linearFit(),
+        selectors: ["year", "mean_ndvi"]
+      });
+      var slope = ee.Number(ee.Algorithms.If(subsetValid.size().gt(1), fit.get("scale"), 0));
+
+      return subset.map(function (row) {
+        var barePct = ee.Number(row.get("bare_pct"));
+        var vegPct = ee.Number(row.get("non_mining_soil_pct"));
+        var decline = slope.min(0).abs();
+        var increase = slope.max(0);
+
+        var disturbanceScore = barePct.multiply(0.7).add(decline.multiply(100).multiply(0.3));
+        var recoveryScore = vegPct.multiply(0.7).add(increase.multiply(100).multiply(0.3));
+
+        return row.set({
+          ndvi_trend_slope: slope,
+          disturbance_score: disturbanceScore,
+          recovery_score: recoveryScore
+        });
+      });
+    })
+  ).flatten(),
+  longStats.map(addNullTrendFields)
+));
 
 // ---------------------------------------------------------------------------
 // 7) WIDE TABLE (site x year with separate 1 km and 2 km columns)
@@ -471,54 +503,58 @@ function maybeGetEither(primaryFeatureObj, fallbackFeatureObj, prop) {
   );
 }
 
-var uniqueSiteYearKeys = ee.List(longWithTrend.aggregate_array("site_year_key")).distinct();
+var wideStats = ee.FeatureCollection(ee.Algorithms.If(
+  cfg.exportWide,
+  ee.FeatureCollection(ee.List(longWithTrend.aggregate_array("site_year_key")).distinct().map(function (key) {
+    var perYear = longWithTrend.filter(ee.Filter.eq("site_year_key", key));
+    var row1k = perYear.filter(ee.Filter.eq("buffer_m", cfg.buffersM[0])).first();
+    var row2k = perYear.filter(ee.Filter.eq("buffer_m", cfg.buffersM[1])).first();
 
-var wideStats = ee.FeatureCollection(uniqueSiteYearKeys.map(function (key) {
-  var perYear = longWithTrend.filter(ee.Filter.eq("site_year_key", key));
-  var row1k = perYear.filter(ee.Filter.eq("buffer_m", cfg.buffersM[0])).first();
-  var row2k = perYear.filter(ee.Filter.eq("buffer_m", cfg.buffersM[1])).first();
+    return ee.Feature(null, {
+      site_id: maybeGetEither(row1k, row2k, "site_id"),
+      site_name: maybeGetEither(row1k, row2k, "site_name"),
+      prod_stage: maybeGetEither(row1k, row2k, "prod_stage"),
+      commodities: maybeGetEither(row1k, row2k, "commodities"),
+      year: maybeGetEither(row1k, row2k, "year"),
 
-  return ee.Feature(null, {
-    site_id: maybeGetEither(row1k, row2k, "site_id"),
-    site_name: maybeGetEither(row1k, row2k, "site_name"),
-    prod_stage: maybeGetEither(row1k, row2k, "prod_stage"),
-    commodities: maybeGetEither(row1k, row2k, "commodities"),
-    year: maybeGetEither(row1k, row2k, "year"),
+      mean_ndvi_1km: maybeGet(row1k, "mean_ndvi"),
+      mean_ndvi_2km: maybeGet(row2k, "mean_ndvi"),
+      median_ndvi_1km: maybeGet(row1k, "median_ndvi"),
+      median_ndvi_2km: maybeGet(row2k, "median_ndvi"),
+      ndvi_sd_1km: maybeGet(row1k, "ndvi_sd"),
+      ndvi_sd_2km: maybeGet(row2k, "ndvi_sd"),
+      valid_px_pct_1km: maybeGet(row1k, "valid_px_pct"),
+      valid_px_pct_2km: maybeGet(row2k, "valid_px_pct"),
 
-    mean_ndvi_1km: maybeGet(row1k, "mean_ndvi"),
-    mean_ndvi_2km: maybeGet(row2k, "mean_ndvi"),
-    median_ndvi_1km: maybeGet(row1k, "median_ndvi"),
-    median_ndvi_2km: maybeGet(row2k, "median_ndvi"),
-    ndvi_sd_1km: maybeGet(row1k, "ndvi_sd"),
-    ndvi_sd_2km: maybeGet(row2k, "ndvi_sd"),
-    valid_px_pct_1km: maybeGet(row1k, "valid_px_pct"),
-    valid_px_pct_2km: maybeGet(row2k, "valid_px_pct"),
+      bare_pct_1km: maybeGet(row1k, "bare_pct"),
+      bare_pct_2km: maybeGet(row2k, "bare_pct"),
+      area_bare_ha_1km: maybeGet(row1k, "area_bare_ha"),
+      area_bare_ha_2km: maybeGet(row2k, "area_bare_ha"),
+      area_sparse_ha_1km: maybeGet(row1k, "area_sparse_ha"),
+      area_sparse_ha_2km: maybeGet(row2k, "area_sparse_ha"),
+      area_veg_ha_1km: maybeGet(row1k, "area_veg_ha"),
+      area_veg_ha_2km: maybeGet(row2k, "area_veg_ha"),
 
-    bare_pct_1km: maybeGet(row1k, "bare_pct"),
-    bare_pct_2km: maybeGet(row2k, "bare_pct"),
-    area_bare_ha_1km: maybeGet(row1k, "area_bare_ha"),
-    area_bare_ha_2km: maybeGet(row2k, "area_bare_ha"),
-    area_sparse_ha_1km: maybeGet(row1k, "area_sparse_ha"),
-    area_sparse_ha_2km: maybeGet(row2k, "area_sparse_ha"),
-    area_veg_ha_1km: maybeGet(row1k, "area_veg_ha"),
-    area_veg_ha_2km: maybeGet(row2k, "area_veg_ha"),
+      ndvi_trend_slope_1km: maybeGet(row1k, "ndvi_trend_slope"),
+      ndvi_trend_slope_2km: maybeGet(row2k, "ndvi_trend_slope"),
+      disturbance_score_1km: maybeGet(row1k, "disturbance_score"),
+      disturbance_score_2km: maybeGet(row2k, "disturbance_score"),
+      recovery_score_1km: maybeGet(row1k, "recovery_score"),
+      recovery_score_2km: maybeGet(row2k, "recovery_score"),
 
-    ndvi_trend_slope_1km: maybeGet(row1k, "ndvi_trend_slope"),
-    ndvi_trend_slope_2km: maybeGet(row2k, "ndvi_trend_slope"),
-    disturbance_score_1km: maybeGet(row1k, "disturbance_score"),
-    disturbance_score_2km: maybeGet(row2k, "disturbance_score"),
-    recovery_score_1km: maybeGet(row1k, "recovery_score"),
-    recovery_score_2km: maybeGet(row2k, "recovery_score"),
-
-    topo_correction_applied: cfg.applyTopoCorrection
-  });
-}));
+      topo_correction_applied: cfg.applyTopoCorrection
+    });
+  })),
+  ee.FeatureCollection([])
+));
 
 // ---------------------------------------------------------------------------
 // 8) DEBUG PRINTS + EXPORTS
 // ---------------------------------------------------------------------------
 print("Long table preview:", longWithTrend.limit(5));
-print("Wide table preview:", wideStats.limit(5));
+if (cfg.exportWide) {
+  print("Wide table preview:", wideStats.limit(5));
+}
 
 Export.table.toDrive({
   collection: longWithTrend,
@@ -528,10 +564,12 @@ Export.table.toDrive({
   fileFormat: "CSV"
 });
 
-Export.table.toDrive({
-  collection: wideStats,
-  description: cfg.exportPrefixWide,
-  folder: cfg.exportFolder,
-  fileNamePrefix: cfg.exportPrefixWide,
-  fileFormat: "CSV"
-});
+if (cfg.exportWide) {
+  Export.table.toDrive({
+    collection: wideStats,
+    description: cfg.exportPrefixWide,
+    folder: cfg.exportFolder,
+    fileNamePrefix: cfg.exportPrefixWide,
+    fileFormat: "CSV"
+  });
+}
