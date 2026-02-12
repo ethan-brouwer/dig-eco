@@ -99,10 +99,28 @@ function extractCommodity(desc) {
   return ee.Algorithms.If(m.size().gt(1), ee.String(m.get(1)), null);
 }
 
+function extractDescField(desc, fieldName) {
+  var s = ee.String(ee.Algorithms.If(ee.Algorithms.IsEqual(desc, null), "", desc));
+  var pattern = ee.String(fieldName).cat("</th><td>([^<]*)");
+  var m = s.match(pattern);
+  return ee.Algorithms.If(m.size().gt(1), ee.String(m.get(1)).trim(), null);
+}
+
+function extractCommodityList(desc) {
+  var values = ee.List([
+    extractDescField(desc, "commod1"),
+    extractDescField(desc, "commod2"),
+    extractDescField(desc, "commod3"),
+    extractDescField(desc, "ore")
+  ]).removeAll([null, ""]);
+  return ee.Algorithms.If(values.size().gt(0), values.distinct().join(", "), null);
+}
+
 function firstNonNull(feature, keys, fallback) {
-  var dict = ee.Dictionary(feature.toDictionary());
+  var props = feature.propertyNames();
   var values = ee.List(keys).map(function (k) {
-    return dict.get(ee.String(k), null);
+    k = ee.String(k);
+    return ee.Algorithms.If(props.contains(k), feature.get(k), null);
   });
   var compact = values.removeAll([null, ""]);
   return ee.Algorithms.If(compact.size().gt(0), compact.get(0), fallback);
@@ -134,19 +152,26 @@ var mrds = mrdsRaw
   .filter(ee.Filter.eq("valid_coord", 1))
   .filterBounds(elsal)
   .map(function (f) {
+    var desc = f.get(cfg.descField);
     var siteName = firstNonNull(f, [cfg.nameField, "SITE_NAME", "site_name", "name"], "unknown_site");
     var siteId = firstNonNull(f, ["ID", "id", "SITE_ID", "site_id", "record_id"], siteName);
-    var stage = firstNonNull(f, ["development_status", "oper_type", "activity", "status"], "unknown");
+    var stage = firstNonNull(
+      f,
+      ["development_status", "dev_stat", "activity", "status", "oper_type"],
+      extractDescField(desc, "dev_stat")
+    );
+    var operType = firstNonNull(f, ["oper_type"], extractDescField(desc, "oper_type"));
     var commod = firstNonNull(
       f,
-      ["commod1", "commodity", "commodities", "main_commodity"],
-      extractCommodity(f.get(cfg.descField))
+      ["commod1", "commodity", "commodities", "main_commodity", "ore"],
+      extractCommodityList(desc)
     );
 
     return f.set({
       site_id: siteId,
       site_name: siteName,
       prod_stage: stage,
+      oper_type: ee.Algorithms.If(ee.Algorithms.IsEqual(operType, null), "unknown", operType),
       commodities: ee.Algorithms.If(ee.Algorithms.IsEqual(commod, null), "unknown", commod)
     });
   });
