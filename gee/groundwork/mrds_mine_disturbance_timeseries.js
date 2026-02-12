@@ -100,8 +100,10 @@ function extractCommodity(desc) {
 }
 
 function firstNonNull(feature, keys, fallback) {
-  var dict = feature.toDictionary();
-  var values = ee.List(keys).map(function (k) { return dict.get(ee.String(k)); });
+  var dict = ee.Dictionary(feature.toDictionary());
+  var values = ee.List(keys).map(function (k) {
+    return dict.get(ee.String(k), null);
+  });
   var compact = values.removeAll([null, ""]);
   return ee.Algorithms.If(compact.size().gt(0), compact.get(0), fallback);
 }
