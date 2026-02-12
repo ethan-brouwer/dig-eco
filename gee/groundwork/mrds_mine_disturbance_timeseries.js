@@ -31,8 +31,9 @@ var cfg = {
 
   // Memory controls
   singleSiteId: null,     // e.g. "12345" for one-site debugging
-  siteBatchSize: 25,      // set null to run all sites at once
-  siteBatchIndex: 0,      // 0-based batch index
+  singleSiteName: null,   // exact match to Name field
+  sitePartitionCount: 1,  // set >1 to split sites into partitions
+  sitePartitionIndex: 0,  // 0-based partition index
   computeTrend: false,    // enable after base export is stable
   exportWide: false,      // wide table is heavier than long table
 
@@ -93,39 +94,6 @@ function parseCoord(value) {
   return ee.Algorithms.If(hasNum, ee.Number.parse(s), null);
 }
 
-function extractCommodity(desc) {
-  var s = ee.String(ee.Algorithms.If(ee.Algorithms.IsEqual(desc, null), "", desc));
-  var m = s.match("commod1</th><td>([^<]*)");
-  return ee.Algorithms.If(m.size().gt(1), ee.String(m.get(1)), null);
-}
-
-function extractDescField(desc, fieldName) {
-  var s = ee.String(ee.Algorithms.If(ee.Algorithms.IsEqual(desc, null), "", desc));
-  var pattern = ee.String(fieldName).cat("</th><td>([^<]*)");
-  var m = s.match(pattern);
-  return ee.Algorithms.If(m.size().gt(1), ee.String(m.get(1)).trim(), null);
-}
-
-function extractCommodityList(desc) {
-  var values = ee.List([
-    extractDescField(desc, "commod1"),
-    extractDescField(desc, "commod2"),
-    extractDescField(desc, "commod3"),
-    extractDescField(desc, "ore")
-  ]).removeAll([null, ""]);
-  return ee.Algorithms.If(values.size().gt(0), values.distinct().join(", "), null);
-}
-
-function firstNonNull(feature, keys, fallback) {
-  var props = feature.propertyNames();
-  var values = ee.List(keys).map(function (k) {
-    k = ee.String(k);
-    return ee.Algorithms.If(props.contains(k), feature.get(k), null);
-  });
-  var compact = values.removeAll([null, ""]);
-  return ee.Algorithms.If(compact.size().gt(0), compact.get(0), fallback);
-}
-
 function makePointFromXY(f) {
   var x = parseCoord(f.get(cfg.xField));
   var y = parseCoord(f.get(cfg.yField));
@@ -152,27 +120,19 @@ var mrds = mrdsRaw
   .filter(ee.Filter.eq("valid_coord", 1))
   .filterBounds(elsal)
   .map(function (f) {
-    var desc = f.get(cfg.descField);
-    var siteName = firstNonNull(f, [cfg.nameField, "SITE_NAME", "site_name", "name"], "unknown_site");
-    var siteId = firstNonNull(f, ["ID", "id", "SITE_ID", "site_id", "record_id"], siteName);
-    var stage = firstNonNull(
-      f,
-      ["development_status", "dev_stat", "activity", "status", "oper_type"],
-      extractDescField(desc, "dev_stat")
-    );
-    var operType = firstNonNull(f, ["oper_type"], extractDescField(desc, "oper_type"));
-    var commod = firstNonNull(
-      f,
-      ["commod1", "commodity", "commodities", "main_commodity", "ore"],
-      extractCommodityList(desc)
-    );
+    var siteName = ee.String(ee.Algorithms.If(
+      ee.Algorithms.IsEqual(f.get(cfg.nameField), null),
+      "unknown_site",
+      f.get(cfg.nameField)
+    ));
+    var siteId = ee.String(siteName).cat("_").cat(ee.String(f.id()));
 
     return f.set({
       site_id: siteId,
       site_name: siteName,
-      prod_stage: stage,
-      oper_type: ee.Algorithms.If(ee.Algorithms.IsEqual(operType, null), "unknown", operType),
-      commodities: ee.Algorithms.If(ee.Algorithms.IsEqual(commod, null), "unknown", commod)
+      prod_stage: "unknown",
+      oper_type: "unknown",
+      commodities: "unknown"
     });
   });
 
@@ -183,10 +143,17 @@ function applySiteScope(fc) {
   if (cfg.singleSiteId !== null) {
     return fc.filter(ee.Filter.eq("site_id", cfg.singleSiteId));
   }
-  if (cfg.siteBatchSize !== null) {
-    var sorted = fc.sort("site_id");
-    var start = cfg.siteBatchSize * cfg.siteBatchIndex;
-    return ee.FeatureCollection(sorted.toList(cfg.siteBatchSize, start));
+  if (cfg.singleSiteName !== null) {
+    return fc.filter(ee.Filter.eq("site_name", cfg.singleSiteName));
+  }
+  if (cfg.sitePartitionCount > 1) {
+    var withRand = fc.randomColumn("_part_rand", 1337);
+    var width = 1 / cfg.sitePartitionCount;
+    var lo = cfg.sitePartitionIndex * width;
+    var hi = lo + width;
+    return withRand
+      .filter(ee.Filter.gte("_part_rand", lo))
+      .filter(ee.Filter.lt("_part_rand", hi));
   }
   return fc;
 }
