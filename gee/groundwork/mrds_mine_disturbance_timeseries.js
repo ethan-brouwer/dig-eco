@@ -460,6 +460,11 @@ if (cfg.exportPerYear) {
         fileFormat: "CSV"
       });
     });
+    if (yearList.length > 0) {
+      var previewYear = yearList[0];
+      var previewRow = buildStatsForYear(previewYear).first();
+      print("CSV first-row preview (" + String(previewYear) + "):", previewRow);
+    }
     print("Per-year export tasks queued:", yearList.length);
     print("Scope tag:", tag);
   });
