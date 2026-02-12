@@ -99,10 +99,8 @@ function firstNonNull(feature, keys, fallback) {
 function makePointFromXY(f) {
   var x = parseCoord(f.get(cfg.xField));
   var y = parseCoord(f.get(cfg.yField));
-  var invalid = ee.Algorithms.Or(
-    ee.Algorithms.IsEqual(x, null),
-    ee.Algorithms.IsEqual(y, null)
-  );
+  var invalid = ee.Boolean(ee.Algorithms.IsEqual(x, null))
+    .or(ee.Boolean(ee.Algorithms.IsEqual(y, null)));
   var valid = ee.Number(ee.Algorithms.If(invalid, 0, 1));
   var safeX = ee.Number(ee.Algorithms.If(invalid, 0, x));
   var safeY = ee.Number(ee.Algorithms.If(invalid, 0, y));
