@@ -28,6 +28,8 @@ var cfg = {
   endYear: ee.Number(ee.Date(Date.now()).get("year")).subtract(1), // last full year
   includeCurrentPartialYear: false,
   includeYearsWithNoImages: false,
+  exportStartYear: 2013,  // limit queued exports to a year chunk
+  exportEndYear: 2025,    // limit queued exports to a year chunk
 
   // Memory controls
   singleSiteId: null,     // e.g. "12345" for one-site debugging
@@ -447,6 +449,11 @@ function scopeTag() {
 
 if (cfg.exportPerYear) {
   years.evaluate(function (yearList) {
+    yearList = yearList.filter(function (y) {
+      var okStart = (cfg.exportStartYear === null) || (y >= cfg.exportStartYear);
+      var okEnd = (cfg.exportEndYear === null) || (y <= cfg.exportEndYear);
+      return okStart && okEnd;
+    });
     var tag = scopeTag();
     yearList.forEach(function (year) {
       var fc = buildStatsForYear(year);
@@ -466,6 +473,7 @@ if (cfg.exportPerYear) {
       print("CSV first-row preview (" + String(previewYear) + "):", previewRow);
     }
     print("Per-year export tasks queued:", yearList.length);
+    print("Export year window:", cfg.exportStartYear + " to " + cfg.exportEndYear);
     print("Scope tag:", tag);
   });
 }
