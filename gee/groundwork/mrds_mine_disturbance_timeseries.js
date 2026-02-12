@@ -33,10 +33,11 @@ var cfg = {
 
   // Memory controls
   singleSiteId: null,     // e.g. "12345" for one-site debugging
-  singleSiteName: null,   // exact match to Name field
+  singleSiteName: "Laguna Alegria", // exact match to Name field
   sitePartitionCount: 1,  // set >1 to split sites into partitions
   sitePartitionIndex: 0,  // 0-based partition index
-  exportPerYear: true,    // strongly recommended for memory safety
+  exportPerYear: false,   // one CSV per year (many tasks)
+  exportSiteSeries: true, // one CSV with all selected years for current scope
 
   // Seasonal compositing window (El Salvador default: dry season Nov-Apr)
   seasonStartMonth: 11,
@@ -328,6 +329,16 @@ function classifyNdvi(ndvi) {
 var years = analysisYears();
 print("Configured year count:", years.size());
 
+function exportYearsList() {
+  var lo = ee.Number(cfg.startYear).max(cfg.exportStartYear);
+  var hi = ee.Number(cfg.endYear).min(cfg.exportEndYear);
+  return ee.List(ee.Algorithms.If(
+    lo.lte(hi),
+    ee.List.sequence(lo, hi),
+    ee.List([])
+  ));
+}
+
 // ---------------------------------------------------------------------------
 // 5) ZONAL STATS PER SITE x YEAR x BUFFER
 // ---------------------------------------------------------------------------
@@ -448,17 +459,13 @@ function scopeTag() {
 }
 
 if (cfg.exportPerYear) {
-  years.evaluate(function (yearList) {
-    yearList = yearList.filter(function (y) {
-      var okStart = (cfg.exportStartYear === null) || (y >= cfg.exportStartYear);
-      var okEnd = (cfg.exportEndYear === null) || (y <= cfg.exportEndYear);
-      return okStart && okEnd;
-    });
-    var tag = scopeTag();
+  var taskYears = exportYearsList();
+  var tagPerYear = scopeTag();
+  taskYears.evaluate(function (yearList) {
     yearList.forEach(function (year) {
       var fc = buildStatsForYear(year);
       var y = String(year);
-      var name = cfg.exportPrefixLong + "_" + tag + "_" + y;
+      var name = cfg.exportPrefixLong + "_" + tagPerYear + "_" + y;
       Export.table.toDrive({
         collection: fc,
         description: name,
@@ -467,13 +474,29 @@ if (cfg.exportPerYear) {
         fileFormat: "CSV"
       });
     });
-    if (yearList.length > 0) {
-      var previewYear = yearList[0];
-      var previewRow = buildStatsForYear(previewYear).first();
-      print("CSV first-row preview (" + String(previewYear) + "):", previewRow);
-    }
     print("Per-year export tasks queued:", yearList.length);
-    print("Export year window:", cfg.exportStartYear + " to " + cfg.exportEndYear);
-    print("Scope tag:", tag);
+  });
+}
+
+if (cfg.exportSiteSeries) {
+  var seriesYears = exportYearsList();
+  var seriesFc = ee.FeatureCollection(seriesYears.map(function (y) {
+    return buildStatsForYear(y);
+  })).flatten();
+
+  var tagSeries = scopeTag();
+  var rangeTag = String(cfg.exportStartYear) + "_" + String(cfg.exportEndYear);
+  var seriesName = cfg.exportPrefixLong + "_" + tagSeries + "_" + rangeTag;
+
+  print("CSV first-row preview (site-series):", seriesFc.first());
+  print("Export year window:", cfg.exportStartYear + " to " + cfg.exportEndYear);
+  print("Scope tag:", tagSeries);
+
+  Export.table.toDrive({
+    collection: seriesFc,
+    description: seriesName,
+    folder: cfg.exportFolder,
+    fileNamePrefix: seriesName,
+    fileFormat: "CSV"
   });
 }
