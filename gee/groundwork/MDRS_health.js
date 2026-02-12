@@ -124,11 +124,15 @@ var mrdsClean = mrdsTable
 var mrdsParsed = mrdsClean.map(function (f) {
   var x = parseCoord(f.get(xField));
   var y = parseCoord(f.get(yField));
-  var invalid = ee.Boolean(ee.Algorithms.IsEqual(x, null))
-    .or(ee.Boolean(ee.Algorithms.IsEqual(y, null)));
-  var valid = ee.Algorithms.If(invalid, 0, 1);
-  var safeX = ee.Number(ee.Algorithms.If(valid, x, 0));
-  var safeY = ee.Number(ee.Algorithms.If(valid, y, 0));
+  var invalid = ee.Algorithms.If(
+    ee.Algorithms.IsEqual(x, null),
+    1,
+    ee.Algorithms.If(ee.Algorithms.IsEqual(y, null), 1, 0)
+  );
+  var invalidFlag = ee.Number(invalid).eq(1);
+  var valid = ee.Algorithms.If(invalidFlag, 0, 1);
+  var safeX = ee.Number(ee.Algorithms.If(invalidFlag, 0, x));
+  var safeY = ee.Number(ee.Algorithms.If(invalidFlag, 0, y));
   var geom = ee.Geometry.Point([safeX, safeY]);
   var commod = extractCommodity(f.get(descField));
   return ee.Feature(geom, f.toDictionary())
