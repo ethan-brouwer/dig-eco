@@ -38,6 +38,7 @@ var cfg = {
   sitePartitionIndex: 0,  // 0-based partition index
   exportPerYear: false,   // one CSV per year (many tasks)
   exportSiteSeries: true, // one CSV with all selected years for current scope
+  previewSeriesFirstRow: false, // can trigger memory errors on large jobs
 
   // Seasonal compositing window (El Salvador default: dry season Nov-Apr)
   seasonStartMonth: 11,
@@ -347,6 +348,13 @@ function exportYearsList() {
   ));
 }
 
+function buildSeriesCollection(yearsList) {
+  var empty = ee.FeatureCollection([]);
+  return ee.FeatureCollection(ee.List(yearsList).iterate(function (y, acc) {
+    return ee.FeatureCollection(acc).merge(buildStatsForYear(y));
+  }, empty));
+}
+
 // ---------------------------------------------------------------------------
 // 5) ZONAL STATS PER SITE x YEAR x BUFFER
 // ---------------------------------------------------------------------------
@@ -488,15 +496,15 @@ if (cfg.exportPerYear) {
 
 if (cfg.exportSiteSeries) {
   var seriesYears = exportYearsList();
-  var seriesFc = ee.FeatureCollection(seriesYears.map(function (y) {
-    return buildStatsForYear(y);
-  })).flatten();
+  var seriesFc = buildSeriesCollection(seriesYears);
 
   var tagSeries = scopeTag();
   var rangeTag = String(cfg.exportStartYear) + "_" + String(cfg.exportEndYear);
   var seriesName = cfg.exportPrefixLong + "_" + tagSeries + "_" + rangeTag;
 
-  print("CSV first-row preview (site-series):", seriesFc.first());
+  if (cfg.previewSeriesFirstRow) {
+    print("CSV first-row preview (site-series):", seriesFc.first());
+  }
   print("Export year window:", cfg.exportStartYear + " to " + cfg.exportEndYear);
   print("Scope tag:", tagSeries);
 
