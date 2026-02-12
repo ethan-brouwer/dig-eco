@@ -241,6 +241,13 @@ function addNdvi(img) {
   return img.addBands(ndvi);
 }
 
+// EE may infer different per-image numeric ranges after topo correction.
+// Force a stable, homogeneous float type for optical bands.
+function forceOpticalFloat(img) {
+  return img.select(targetBands).toFloat()
+    .copyProperties(img, img.propertyNames());
+}
+
 function standardizeLandsatByBands(colId, sourceBands) {
   return ee.ImageCollection(colId)
     .filter(ee.Filter.lt("CLOUD_COVER", cfg.cloudCoverMax))
@@ -268,6 +275,7 @@ var landsatPrepared = landsatBase
       ee.Algorithms.If(cfg.applyTopoCorrection, applyTopographicCorrection(img, terrain), img.set("topo_corrected", 0))
     );
   })
+  .map(forceOpticalFloat)
   .map(addNdvi);
 
 // ---------------------------------------------------------------------------
