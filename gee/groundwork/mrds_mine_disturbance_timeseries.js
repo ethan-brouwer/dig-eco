@@ -38,6 +38,9 @@ var cfg = {
   sitePartitionIndex: 0,  // 0-based partition index
   exportPerYear: false,   // one CSV per year (many tasks)
   exportSiteSeries: true, // one CSV with all selected years for current scope
+  previewSeriesFirstRow: false, // can trigger memory errors on large jobs
+  processingRegionMode: "site", // "site" (default) or "country"
+  limitInputsToExportWindow: true, // prefilter Landsat time range for faster runs
 
   // Seasonal compositing window (El Salvador default: dry season Nov-Apr)
   seasonStartMonth: 11,
@@ -175,6 +178,14 @@ var buffers1k = makeBuffers(mrds, cfg.buffersM[0]);
 var buffers2k = makeBuffers(mrds, cfg.buffersM[1]);
 var siteBuffers = buffers1k.merge(buffers2k);
 
+var processingRegion = cfg.processingRegionMode === "country"
+  ? elsal.geometry()
+  : ee.Geometry(ee.Algorithms.If(
+      ee.Number(mrds.size()).gt(0),
+      siteBuffers.geometry(),
+      elsal.geometry()
+    ));
+
 Map.addLayer(buffers1k.style({color: "00FFFF", width: 1, fillColor: "00000000"}), {}, "MRDS buffers 1 km", false);
 Map.addLayer(buffers2k.style({color: "FF00FF", width: 1, fillColor: "00000000"}), {}, "MRDS buffers 2 km", false);
 
@@ -241,9 +252,25 @@ function addNdvi(img) {
   return img.addBands(ndvi);
 }
 
-function standardizeLandsatByBands(colId, sourceBands) {
-  return ee.ImageCollection(colId)
-    .filter(ee.Filter.lt("CLOUD_COVER", cfg.cloudCoverMax))
+// EE may infer different per-image numeric ranges after topo correction.
+// Force a stable, homogeneous float type for optical bands.
+function forceOpticalFloat(img) {
+  return img.select(targetBands).toFloat()
+    .copyProperties(img, img.propertyNames());
+}
+
+function standardizeLandsatByBands(colId, sourceBands, region) {
+  var col = ee.ImageCollection(colId)
+    .filterBounds(region)
+    .filter(ee.Filter.lt("CLOUD_COVER", cfg.cloudCoverMax));
+
+  if (cfg.limitInputsToExportWindow) {
+    var inputStart = ee.Date.fromYMD(cfg.exportStartYear - 1, 1, 1);
+    var inputEnd = ee.Date.fromYMD(cfg.exportEndYear + 2, 1, 1);
+    col = col.filterDate(inputStart, inputEnd);
+  }
+
+  return col
     .map(maskLandsatL2)
     .map(function (img) {
       var optical = img.select(sourceBands, targetBands)
@@ -256,11 +283,10 @@ function standardizeLandsatByBands(colId, sourceBands) {
 var dem = ee.Image(cfg.demAsset);
 var terrain = getTerrainProducts(dem);
 
-var landsatBase = standardizeLandsatByBands(L5, l57Bands)
-  .merge(standardizeLandsatByBands(L7, l57Bands))
-  .merge(standardizeLandsatByBands(L8, l89Bands))
-  .merge(standardizeLandsatByBands(L9, l89Bands))
-  .filterBounds(elsal);
+var landsatBase = standardizeLandsatByBands(L5, l57Bands, processingRegion)
+  .merge(standardizeLandsatByBands(L7, l57Bands, processingRegion))
+  .merge(standardizeLandsatByBands(L8, l89Bands, processingRegion))
+  .merge(standardizeLandsatByBands(L9, l89Bands, processingRegion));
 
 var landsatPrepared = landsatBase
   .map(function (img) {
@@ -268,6 +294,7 @@ var landsatPrepared = landsatBase
       ee.Algorithms.If(cfg.applyTopoCorrection, applyTopographicCorrection(img, terrain), img.set("topo_corrected", 0))
     );
   })
+  .map(forceOpticalFloat)
   .map(addNdvi);
 
 // ---------------------------------------------------------------------------
@@ -298,7 +325,7 @@ function seasonWindow(year) {
 function annualComposite(year) {
   year = ee.Number(year);
   var win = seasonWindow(year);
-  var col = landsatPrepared.filterDate(win.start, win.end).filterBounds(elsal);
+  var col = landsatPrepared.filterDate(win.start, win.end).filterBounds(processingRegion);
   var count = col.size();
   var empty = ee.Image.constant([0, 0, 0, 0, 0, 0, 0])
     .rename(["blue", "green", "red", "nir", "swir1", "swir2", "NDVI"])
@@ -337,6 +364,13 @@ function exportYearsList() {
     ee.List.sequence(lo, hi),
     ee.List([])
   ));
+}
+
+function buildSeriesCollection(yearsList) {
+  var empty = ee.FeatureCollection([]);
+  return ee.FeatureCollection(ee.List(yearsList).iterate(function (y, acc) {
+    return ee.FeatureCollection(acc).merge(buildStatsForYear(y));
+  }, empty));
 }
 
 // ---------------------------------------------------------------------------
@@ -480,15 +514,15 @@ if (cfg.exportPerYear) {
 
 if (cfg.exportSiteSeries) {
   var seriesYears = exportYearsList();
-  var seriesFc = ee.FeatureCollection(seriesYears.map(function (y) {
-    return buildStatsForYear(y);
-  })).flatten();
+  var seriesFc = buildSeriesCollection(seriesYears);
 
   var tagSeries = scopeTag();
   var rangeTag = String(cfg.exportStartYear) + "_" + String(cfg.exportEndYear);
   var seriesName = cfg.exportPrefixLong + "_" + tagSeries + "_" + rangeTag;
 
-  print("CSV first-row preview (site-series):", seriesFc.first());
+  if (cfg.previewSeriesFirstRow) {
+    print("CSV first-row preview (site-series):", seriesFc.first());
+  }
   print("Export year window:", cfg.exportStartYear + " to " + cfg.exportEndYear);
   print("Scope tag:", tagSeries);
 
