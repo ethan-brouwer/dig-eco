@@ -39,6 +39,8 @@ var cfg = {
   exportPerYear: false,   // one CSV per year (many tasks)
   exportSiteSeries: true, // one CSV with all selected years for current scope
   previewSeriesFirstRow: false, // can trigger memory errors on large jobs
+  processingRegionMode: "site", // "site" (default) or "country"
+  limitInputsToExportWindow: true, // prefilter Landsat time range for faster runs
 
   // Seasonal compositing window (El Salvador default: dry season Nov-Apr)
   seasonStartMonth: 11,
@@ -176,6 +178,14 @@ var buffers1k = makeBuffers(mrds, cfg.buffersM[0]);
 var buffers2k = makeBuffers(mrds, cfg.buffersM[1]);
 var siteBuffers = buffers1k.merge(buffers2k);
 
+var processingRegion = cfg.processingRegionMode === "country"
+  ? elsal.geometry()
+  : ee.Geometry(ee.Algorithms.If(
+      ee.Number(mrds.size()).gt(0),
+      siteBuffers.geometry(),
+      elsal.geometry()
+    ));
+
 Map.addLayer(buffers1k.style({color: "00FFFF", width: 1, fillColor: "00000000"}), {}, "MRDS buffers 1 km", false);
 Map.addLayer(buffers2k.style({color: "FF00FF", width: 1, fillColor: "00000000"}), {}, "MRDS buffers 2 km", false);
 
@@ -249,9 +259,18 @@ function forceOpticalFloat(img) {
     .copyProperties(img, img.propertyNames());
 }
 
-function standardizeLandsatByBands(colId, sourceBands) {
-  return ee.ImageCollection(colId)
-    .filter(ee.Filter.lt("CLOUD_COVER", cfg.cloudCoverMax))
+function standardizeLandsatByBands(colId, sourceBands, region) {
+  var col = ee.ImageCollection(colId)
+    .filterBounds(region)
+    .filter(ee.Filter.lt("CLOUD_COVER", cfg.cloudCoverMax));
+
+  if (cfg.limitInputsToExportWindow) {
+    var inputStart = ee.Date.fromYMD(cfg.exportStartYear - 1, 1, 1);
+    var inputEnd = ee.Date.fromYMD(cfg.exportEndYear + 2, 1, 1);
+    col = col.filterDate(inputStart, inputEnd);
+  }
+
+  return col
     .map(maskLandsatL2)
     .map(function (img) {
       var optical = img.select(sourceBands, targetBands)
@@ -264,11 +283,10 @@ function standardizeLandsatByBands(colId, sourceBands) {
 var dem = ee.Image(cfg.demAsset);
 var terrain = getTerrainProducts(dem);
 
-var landsatBase = standardizeLandsatByBands(L5, l57Bands)
-  .merge(standardizeLandsatByBands(L7, l57Bands))
-  .merge(standardizeLandsatByBands(L8, l89Bands))
-  .merge(standardizeLandsatByBands(L9, l89Bands))
-  .filterBounds(elsal);
+var landsatBase = standardizeLandsatByBands(L5, l57Bands, processingRegion)
+  .merge(standardizeLandsatByBands(L7, l57Bands, processingRegion))
+  .merge(standardizeLandsatByBands(L8, l89Bands, processingRegion))
+  .merge(standardizeLandsatByBands(L9, l89Bands, processingRegion));
 
 var landsatPrepared = landsatBase
   .map(function (img) {
@@ -307,7 +325,7 @@ function seasonWindow(year) {
 function annualComposite(year) {
   year = ee.Number(year);
   var win = seasonWindow(year);
-  var col = landsatPrepared.filterDate(win.start, win.end).filterBounds(elsal);
+  var col = landsatPrepared.filterDate(win.start, win.end).filterBounds(processingRegion);
   var count = col.size();
   var empty = ee.Image.constant([0, 0, 0, 0, 0, 0, 0])
     .rename(["blue", "green", "red", "nir", "swir1", "swir2", "NDVI"])
