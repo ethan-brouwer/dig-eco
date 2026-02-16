@@ -1,11 +1,11 @@
 /*
   FILE: gee/groundwork/mrds_mine_disturbance_timeseries.js
-  PURPOSE: Draft workflow to monitor disturbance around MRDS sites in El Salvador
-           using Landsat annual composites and NDVI class thresholds.
+  PURPOSE: Monitor disturbance around mined MRDS sites in El Salvador using
+           Landsat annual composites, NDVI classes, and multi-index trends.
   INPUTS: MRDS point asset, Landsat C2 L2 SR, GAUL boundary, DEM.
   OUTPUTS: Long and wide CSV tables for 1 km and 2 km buffers.
   AUTHOR: Ethan Brouwer + Codex draft
-  LAST MODIFIED: 2026-02-12
+  LAST MODIFIED: 2026-02-16
 */
 
 // ---------------------------------------------------------------------------
@@ -21,19 +21,28 @@ var cfg = {
   xField: "X",
   yField: "Y",
   nameField: "Name",
-  descField: "description",
+  targetMineNames: [
+    "Divisadero Mine",
+    "El Porvenir",
+    "Hormiguero Mine",
+    "Monte Cristo Mine",
+    "Monte Mayor Mine",
+    "Potosi Mine",
+    "San Juan Mine",
+    "San Sebastian Mine"
+  ],
 
   // Analysis window
   startYear: 1984,
   endYear: ee.Number(ee.Date(Date.now()).get("year")).subtract(1), // last full year
   includeCurrentPartialYear: false,
   includeYearsWithNoImages: false,
-  exportStartYear: 2013,  // limit queued exports to a year chunk
-  exportEndYear: 2025,    // limit queued exports to a year chunk
+  exportStartYear: 1984,  // include full Landsat-era history by default
+  exportEndYear: new Date().getFullYear() - 1, // client-side last full year
 
   // Memory controls
   singleSiteId: null,     // e.g. "12345" for one-site debugging
-  singleSiteName: "Laguna Alegria", // exact match to Name field
+  singleSiteName: null,   // set exact Name field value for one-site debugging
   sitePartitionCount: 1,  // set >1 to split sites into partitions
   sitePartitionIndex: 0,  // 0-based partition index
   exportPerYear: false,   // one CSV per year (many tasks)
@@ -41,6 +50,7 @@ var cfg = {
   previewSeriesFirstRow: false, // can trigger memory errors on large jobs
   processingRegionMode: "site", // "site" (default) or "country"
   limitInputsToExportWindow: true, // prefilter Landsat time range for faster runs
+  maxImagesPerSeason: 40, // cap images used in each seasonal composite
 
   // Seasonal compositing window (El Salvador default: dry season Nov-Apr)
   seasonStartMonth: 11,
@@ -123,8 +133,13 @@ var mrds = mrdsRaw
   .filter(ee.Filter.neq(cfg.yField, ""))
   .map(makePointFromXY)
   .filter(ee.Filter.eq("valid_coord", 1))
-  .filterBounds(elsal)
-  .map(function (f) {
+  .filterBounds(elsal);
+
+if (cfg.targetMineNames !== null && cfg.targetMineNames.length > 0) {
+  mrds = mrds.filter(ee.Filter.inList(cfg.nameField, cfg.targetMineNames));
+}
+
+mrds = mrds.map(function (f) {
     var siteName = ee.String(ee.Algorithms.If(
       ee.Algorithms.IsEqual(f.get(cfg.nameField), null),
       "unknown_site",
@@ -136,13 +151,12 @@ var mrds = mrdsRaw
       site_id: siteId,
       site_name: siteName,
       prod_stage: "unknown",
-      oper_type: "unknown",
       commodities: "unknown"
     });
   });
-
-Map.addLayer(mrds.style({color: "FFAA00", pointSize: 5}), {}, "MRDS sites");
-print("MRDS sites in El Salvador:", mrds.size());
+Map.addLayer(mrds.style({color: "FFAA00", pointSize: 5}), {}, "MRDS target sites");
+print("Configured target mine names:", cfg.targetMineNames);
+print("MRDS target sites in El Salvador:", mrds.size());
 
 function applySiteScope(fc) {
   if (cfg.singleSiteId !== null) {
@@ -252,6 +266,28 @@ function addNdvi(img) {
   return img.addBands(ndvi);
 }
 
+function addIndices(img) {
+  var blue = img.select("blue");
+  var green = img.select("green");
+  var red = img.select("red");
+  var nir = img.select("nir");
+  var swir1 = img.select("swir1");
+
+  var ndmi = img.normalizedDifference(["nir", "swir1"]).rename("NDMI");
+  var ndbi = img.normalizedDifference(["swir1", "nir"]).rename("NDBI");
+  var ndti = img.normalizedDifference(["red", "green"]).rename("NDTI");
+  var savi = img.expression(
+    "((NIR - RED) / (NIR + RED + L)) * (1 + L)",
+    {NIR: nir, RED: red, L: 0.5}
+  ).rename("SAVI");
+  var bsi = img.expression(
+    "((SWIR + RED) - (NIR + BLUE)) / ((SWIR + RED) + (NIR + BLUE))",
+    {SWIR: swir1, RED: red, NIR: nir, BLUE: blue}
+  ).rename("BSI");
+
+  return img.addBands([ndmi, ndbi, ndti, savi, bsi]);
+}
+
 // EE may infer different per-image numeric ranges after topo correction.
 // Force a stable, homogeneous float type for optical bands.
 function forceOpticalFloat(img) {
@@ -295,7 +331,8 @@ var landsatPrepared = landsatBase
     );
   })
   .map(forceOpticalFloat)
-  .map(addNdvi);
+  .map(addNdvi)
+  .map(addIndices);
 
 // ---------------------------------------------------------------------------
 // 4) ANNUAL COMPOSITES + CLASSIFICATION
@@ -325,10 +362,18 @@ function seasonWindow(year) {
 function annualComposite(year) {
   year = ee.Number(year);
   var win = seasonWindow(year);
-  var col = landsatPrepared.filterDate(win.start, win.end).filterBounds(processingRegion);
+  var col = landsatPrepared
+    .filterDate(win.start, win.end)
+    .filterBounds(processingRegion)
+    .sort("CLOUD_COVER");
+  col = ee.ImageCollection(ee.Algorithms.If(
+    cfg.maxImagesPerSeason > 0,
+    col.limit(cfg.maxImagesPerSeason),
+    col
+  ));
   var count = col.size();
-  var empty = ee.Image.constant([0, 0, 0, 0, 0, 0, 0])
-    .rename(["blue", "green", "red", "nir", "swir1", "swir2", "NDVI"])
+  var empty = ee.Image.constant([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    .rename(["blue", "green", "red", "nir", "swir1", "swir2", "NDVI", "NDMI", "NDBI", "NDTI", "SAVI", "BSI"])
     .updateMask(ee.Image(0));
   var comp = ee.Image(ee.Algorithms.If(count.gt(0), col.median(), empty))
     .set({
@@ -379,6 +424,11 @@ function buildSeriesCollection(yearsList) {
 function perFeatureYearStats(feature, annualImg) {
   var geom = feature.geometry();
   var ndvi = annualImg.select("NDVI");
+  var ndmi = annualImg.select("NDMI");
+  var ndbi = annualImg.select("NDBI");
+  var ndti = annualImg.select("NDTI");
+  var savi = annualImg.select("SAVI");
+  var bsi = annualImg.select("BSI");
   var ndviClass = annualImg.select("ndvi_class");
   var pixelHa = ee.Image.pixelArea().divide(10000);
 
@@ -386,6 +436,15 @@ function perFeatureYearStats(feature, annualImg) {
     reducer: ee.Reducer.mean()
       .combine(ee.Reducer.median(), null, true)
       .combine(ee.Reducer.stdDev(), null, true),
+    geometry: geom,
+    scale: cfg.scale,
+    tileScale: 4,
+    bestEffort: true,
+    maxPixels: 1e10
+  });
+
+  var extraIdx = ee.Image.cat([ndmi, ndbi, ndti, savi, bsi]).reduceRegion({
+    reducer: ee.Reducer.mean(),
     geometry: geom,
     scale: cfg.scale,
     tileScale: 4,
@@ -442,6 +501,11 @@ function perFeatureYearStats(feature, annualImg) {
     mean_ndvi: ndviStats.get("NDVI_mean"),
     median_ndvi: ndviStats.get("NDVI_median"),
     ndvi_sd: ndviStats.get("NDVI_stdDev"),
+    mean_ndmi: extraIdx.get("NDMI"),
+    mean_ndbi: extraIdx.get("NDBI"),
+    mean_ndti: extraIdx.get("NDTI"),
+    mean_savi: extraIdx.get("SAVI"),
+    mean_bsi: extraIdx.get("BSI"),
     valid_px_pct: validPct,
     area_total_ha: totalAreaHa,
     area_bare_ha: bareHa,

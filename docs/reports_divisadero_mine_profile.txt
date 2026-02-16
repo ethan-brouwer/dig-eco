@@ -1,0 +1,148 @@
+Divisadero Mine Research Report (for MRDS + Remote Sensing Workflow)
+Date: 2026-02-16
+Prepared by: Codex (GPT-5)
+
+Scope
+- Identify mined-history sites in the El Salvador MRDS subset used in this project.
+- Build a deeper profile for Divisadero Mine that supports long-run remote-sensing trend analysis.
+- Prioritize operation timeline, commodities, geology, and environmental signals relevant to NDVI/bare-soil/index trend interpretation.
+
+-------------------------------------------------------------------------------
+1) Mined-History Sites (Selection for GEE Targeting)
+-------------------------------------------------------------------------------
+Selection rule used in MRDS metadata: dev_stat contains "Producer" (in this dataset, all selected rows are "Past Producer").
+
+Selected mine names:
+1. Divisadero Mine
+2. El Porvenir
+3. Hormiguero Mine
+4. Monte Cristo Mine
+5. Monte Mayor Mine
+6. Potosi Mine
+7. San Juan Mine
+8. San Sebastian Mine
+
+Project note:
+- The GEE script is now configured with a manual name list for these eight mines so Earth Engine does not need to parse MRDS metadata at runtime.
+
+-------------------------------------------------------------------------------
+2) Divisadero Mine: Evidence Summary
+-------------------------------------------------------------------------------
+2.1 Identity and commodity
+- MRDS record (labno 10085938): Divisadero Mine, coordinates near 13.60091, -88.06002.
+- Primary commodities are gold and silver (MRDS commod1), with gold as principal ore.
+
+Interpretation relevance:
+- Gold-silver vein systems often produce narrow, heterogeneous disturbance footprints;
+  1 km and 2 km buffers are appropriate for capturing both direct mine disturbance and adjacent land-use changes.
+
+2.2 Operations timeline (confidence-graded)
+High confidence (SEC-filed technical disclosure / historical compilation references):
+- The SEC-filed project history for the San Cristobal area states Divisadero was one of the historically productive mines and reports:
+  - operation in the early 1900s (notably 1907-1917 period),
+  - substantial hoisted tonnage in 1915-1916,
+  - gold-silver grades cited from historical compilations,
+  - later inactivity and modern-era exploration interest.
+
+Moderate confidence (industry press / secondary historical synthesis):
+- Industry reporting around Intrepid-era disclosures describes the district as containing four past-producing mines including Divisadero.
+- Historical narratives describe early activity beginning in the 19th century and intense operation around the Butters period.
+
+RS implication:
+- Landsat-era analysis (1984 onward) mostly captures post-major-production legacy conditions,
+  reworking, revegetation, and downstream disturbance signatures rather than primary production-era land clearing.
+
+2.3 Geology and structural context
+- SEC technical disclosures describe the San Cristobal project area (including Divisadero) as Au-Ag vein mineralization in volcanic units.
+- Host rocks are described as dominantly andesite with related volcanic units.
+- Structural control includes NW-trending faults and vein systems.
+
+RS implication:
+- Structural lineaments and steep slopes can influence reflectance and topographic shading;
+  for inter-annual trend stability, dry-season compositing and optional topographic correction remain important.
+
+2.4 Environmental signal and risk context
+Divisadero-specific direct environmental reporting:
+- Strong, site-specific public contamination documentation for Divisadero itself is limited in accessible sources reviewed here.
+
+Regional mining-environment context (important but not equivalent to site-specific proof):
+- San Sebastian (different mine, same broader eastern mining context) is associated in official/regulatory reporting with severe acid drainage and heavy-metal concerns.
+- ICSID case materials and related disclosures document prolonged environmental permit conflict in El Salvador's metallic mining sector.
+
+Interpretation rule for this project:
+- Treat Divisadero as a legacy mine with uncertain directly published contamination records;
+  use RS trend outputs as a screening layer, then pair anomalies with targeted field/lab evidence where possible.
+
+-------------------------------------------------------------------------------
+3) Recommended Analytical Workflow (GEE + Python/Excel)
+-------------------------------------------------------------------------------
+3.1 In GEE (compute-efficient extraction)
+- Use manual target site list (no metadata parsing).
+- Keep 1 km and 2 km buffers.
+- Use dry-season annual composites.
+- Keep full Landsat-era export window (1984 to last full year).
+- Cap seasonal images (maxImagesPerSeason) to control runtime.
+- Export long-form CSV with:
+  - NDVI metrics,
+  - bare/sparse/vegetation area fractions,
+  - additional indices: NDMI, NDBI, NDTI, SAVI, BSI.
+
+3.2 Outside GEE (trend analysis)
+- Use Python script: analysis/mrds_trends.py
+- Inputs: GEE long CSV export(s).
+- Outputs:
+  - *_clean.csv (Excel-friendly cleaned annual rows)
+  - *_trend_summary.csv (per-site, per-buffer, per-metric trend slopes and direction)
+
+Example command:
+python3 analysis/mrds_trends.py \
+  --input gee/groundwork/MRDSoutputs/Divisadero_Mine_2013_2025.csv
+
+Excel workflow:
+- Load *_trend_summary.csv
+- Filter metric and buffer_m
+- Build line charts from *_clean.csv
+- Use slope columns (OLS and Theil-Sen) for quick ranking of sites/metrics by trend strength.
+
+-------------------------------------------------------------------------------
+4) Data Gaps and Next Research Actions
+-------------------------------------------------------------------------------
+Current gaps:
+- Exact Divisadero operation start/stop years by shaft/level are not consistently available in open-access summaries.
+- Public, site-specific modern water/soil chemistry records for Divisadero are sparse in sources reviewed.
+
+Priority next sources to request/find:
+1. Full technical report appendices (historic production tables by mine and year).
+2. Government environmental monitoring records near El Divisadero drainage.
+3. Archive geologic maps cross-referenced to mine workings and modern land cover.
+
+-------------------------------------------------------------------------------
+5) Sources
+-------------------------------------------------------------------------------
+Primary / high-value technical sources:
+1. USGS MRDS record page (Divisadero Mine, labno 10085938)
+   https://mrdata.usgs.gov/mrds/show.php?labno=10085938
+
+2. SEC Form 40-F filing (Intrepid / San Cristobal project historical & geologic context)
+   https://www.sec.gov/Archives/edgar/data/879338/000106299303000423/form40f.htm
+
+3. SEC filing with NI 43-101 style project disclosure context (El Salvador assets)
+   https://www.sec.gov/Archives/edgar/data/798081/000114420412013182/v305040_ex99-1.htm
+
+Supplemental context sources:
+4. The Northern Miner: historical project context including past-producing mines in district
+   https://www.northernminer.com/news/intrepid-cuts-costs-at-san-cristobal/1000183637/
+
+5. The Northern Miner: regional El Salvador project and historical production context
+   https://www.northernminer.com/news/minefinder-capital-jumps-on-san-cristobal-project-in-el-salvador/1000066722/
+
+6. ICSID arbitration award document (Pacific Rim/OceanaGold v. El Salvador) for policy/environment permit context
+   https://www.italaw.com/cases/769
+
+7. Trade.gov market-intelligence summary of metallic mining law change (Dec 23, 2024)
+   https://www.trade.gov/market-intelligence/el-salvador-industrial-materials-metallic-mining-law
+
+Notes on evidence quality:
+- Items 1-3 are strongest for this workflow.
+- Items 4-5 are useful but secondary industry reporting.
+- Items 6-7 are contextual for policy/environment framing and should not be treated as Divisadero-specific contamination proof.
