@@ -22,11 +22,11 @@ var cfg = {
   yField: "Y",
   nameField: "Name",
   targetMineNames: [
-    "Divisadero Mine",
-    "El Porvenir",
-    "Hormiguero Mine",
+    //"Divisadero Mine",
+    //"El Porvenir",
+    //"Hormiguero Mine",
     "Monte Cristo Mine",
-    "Monte Mayor Mine",
+    //"Monte Mayor Mine",
     "Potosi Mine",
     "San Juan Mine",
     "San Sebastian Mine"
