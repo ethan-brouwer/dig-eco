@@ -1,0 +1,21 @@
+site_name,buffer_m,metric,n_years,start_year,end_year,start_value,end_value,abs_change,pct_change,ols_slope_per_year,theil_sen_slope_per_year,direction_ols,direction_theil_sen
+Divisadero Mine,1000,mean_ndvi,13,2013,2025,0.4557582816886073,0.6164157112285426,0.16065742953993523,35.25057821104016,0.007172732533670702,0.008511755318467498,increasing,increasing
+Divisadero Mine,1000,mean_ndmi,0,,,,,,,,,insufficient_data,insufficient_data
+Divisadero Mine,1000,mean_ndbi,0,,,,,,,,,insufficient_data,insufficient_data
+Divisadero Mine,1000,mean_ndti,0,,,,,,,,,insufficient_data,insufficient_data
+Divisadero Mine,1000,mean_savi,0,,,,,,,,,insufficient_data,insufficient_data
+Divisadero Mine,1000,mean_bsi,0,,,,,,,,,insufficient_data,insufficient_data
+Divisadero Mine,1000,bare_pct,13,2013,2025,0.0,0.02801323982056934,0.02801323982056934,,0.0009235134006781102,0.0,increasing,flat
+Divisadero Mine,1000,mining_soil_pct,13,2013,2025,0.0,0.02801323982056934,0.02801323982056934,,0.0009235134006781102,0.0,increasing,flat
+Divisadero Mine,1000,non_mining_soil_pct,13,2013,2025,99.62017118556538,99.5921579457448,-0.028013239820580793,-0.028120047865004886,-0.0009235134006784877,0.0,decreasing,flat
+Divisadero Mine,1000,valid_px_pct,13,2013,2025,99.62017118556538,99.62017118556538,0.0,0.0,0.0,0.0,flat,flat
+Divisadero Mine,2000,mean_ndvi,13,2013,2025,0.48364584655470494,0.6349842294307948,0.15133838287608986,31.29115735287764,0.006658583366998404,0.008796906855336194,increasing,increasing
+Divisadero Mine,2000,mean_ndmi,0,,,,,,,,,insufficient_data,insufficient_data
+Divisadero Mine,2000,mean_ndbi,0,,,,,,,,,insufficient_data,insufficient_data
+Divisadero Mine,2000,mean_ndti,0,,,,,,,,,insufficient_data,insufficient_data
+Divisadero Mine,2000,mean_savi,0,,,,,,,,,insufficient_data,insufficient_data
+Divisadero Mine,2000,mean_bsi,0,,,,,,,,,insufficient_data,insufficient_data
+Divisadero Mine,2000,bare_pct,13,2013,2025,0.0,0.03501793372116348,0.03501793372116348,,0.0011544373754229717,0.0,increasing,flat
+Divisadero Mine,2000,mining_soil_pct,13,2013,2025,0.0,0.03501793372116348,0.03501793372116348,,0.0011544373754229717,0.0,increasing,flat
+Divisadero Mine,2000,non_mining_soil_pct,13,2013,2025,99.62324627767615,99.58822834395498,-0.03501793372116424,-0.03515036402604274,-0.0011544373754229969,0.0,decreasing,flat
+Divisadero Mine,2000,valid_px_pct,13,2013,2025,99.62324627767615,99.62324627767615,0.0,0.0,0.0,0.0,flat,flat

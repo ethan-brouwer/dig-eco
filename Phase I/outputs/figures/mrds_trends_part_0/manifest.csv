@@ -1,0 +1,61 @@
+site_name,buffer_m,metric,n_points,png_file
+Divisadero Mine,1000,bare_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Divisadero_Mine__1000m__bare_pct.png
+Divisadero Mine,1000,mean_bsi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Divisadero_Mine__1000m__mean_bsi.png
+Divisadero Mine,1000,mean_ndbi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Divisadero_Mine__1000m__mean_ndbi.png
+Divisadero Mine,1000,mean_ndmi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Divisadero_Mine__1000m__mean_ndmi.png
+Divisadero Mine,1000,mean_ndti,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Divisadero_Mine__1000m__mean_ndti.png
+Divisadero Mine,1000,mean_ndvi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Divisadero_Mine__1000m__mean_ndvi.png
+Divisadero Mine,1000,mean_savi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Divisadero_Mine__1000m__mean_savi.png
+Divisadero Mine,1000,mining_soil_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Divisadero_Mine__1000m__mining_soil_pct.png
+Divisadero Mine,1000,non_mining_soil_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Divisadero_Mine__1000m__non_mining_soil_pct.png
+Divisadero Mine,1000,valid_px_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Divisadero_Mine__1000m__valid_px_pct.png
+Divisadero Mine,2000,bare_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Divisadero_Mine__2000m__bare_pct.png
+Divisadero Mine,2000,mean_bsi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Divisadero_Mine__2000m__mean_bsi.png
+Divisadero Mine,2000,mean_ndbi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Divisadero_Mine__2000m__mean_ndbi.png
+Divisadero Mine,2000,mean_ndmi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Divisadero_Mine__2000m__mean_ndmi.png
+Divisadero Mine,2000,mean_ndti,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Divisadero_Mine__2000m__mean_ndti.png
+Divisadero Mine,2000,mean_ndvi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Divisadero_Mine__2000m__mean_ndvi.png
+Divisadero Mine,2000,mean_savi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Divisadero_Mine__2000m__mean_savi.png
+Divisadero Mine,2000,mining_soil_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Divisadero_Mine__2000m__mining_soil_pct.png
+Divisadero Mine,2000,non_mining_soil_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Divisadero_Mine__2000m__non_mining_soil_pct.png
+Divisadero Mine,2000,valid_px_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Divisadero_Mine__2000m__valid_px_pct.png
+El Porvenir,1000,bare_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/El_Porvenir__1000m__bare_pct.png
+El Porvenir,1000,mean_bsi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/El_Porvenir__1000m__mean_bsi.png
+El Porvenir,1000,mean_ndbi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/El_Porvenir__1000m__mean_ndbi.png
+El Porvenir,1000,mean_ndmi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/El_Porvenir__1000m__mean_ndmi.png
+El Porvenir,1000,mean_ndti,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/El_Porvenir__1000m__mean_ndti.png
+El Porvenir,1000,mean_ndvi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/El_Porvenir__1000m__mean_ndvi.png
+El Porvenir,1000,mean_savi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/El_Porvenir__1000m__mean_savi.png
+El Porvenir,1000,mining_soil_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/El_Porvenir__1000m__mining_soil_pct.png
+El Porvenir,1000,non_mining_soil_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/El_Porvenir__1000m__non_mining_soil_pct.png
+El Porvenir,1000,valid_px_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/El_Porvenir__1000m__valid_px_pct.png
+El Porvenir,2000,bare_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/El_Porvenir__2000m__bare_pct.png
+El Porvenir,2000,mean_bsi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/El_Porvenir__2000m__mean_bsi.png
+El Porvenir,2000,mean_ndbi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/El_Porvenir__2000m__mean_ndbi.png
+El Porvenir,2000,mean_ndmi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/El_Porvenir__2000m__mean_ndmi.png
+El Porvenir,2000,mean_ndti,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/El_Porvenir__2000m__mean_ndti.png
+El Porvenir,2000,mean_ndvi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/El_Porvenir__2000m__mean_ndvi.png
+El Porvenir,2000,mean_savi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/El_Porvenir__2000m__mean_savi.png
+El Porvenir,2000,mining_soil_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/El_Porvenir__2000m__mining_soil_pct.png
+El Porvenir,2000,non_mining_soil_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/El_Porvenir__2000m__non_mining_soil_pct.png
+El Porvenir,2000,valid_px_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/El_Porvenir__2000m__valid_px_pct.png
+Monte Mayor Mine,1000,bare_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Monte_Mayor_Mine__1000m__bare_pct.png
+Monte Mayor Mine,1000,mean_bsi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Monte_Mayor_Mine__1000m__mean_bsi.png
+Monte Mayor Mine,1000,mean_ndbi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Monte_Mayor_Mine__1000m__mean_ndbi.png
+Monte Mayor Mine,1000,mean_ndmi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Monte_Mayor_Mine__1000m__mean_ndmi.png
+Monte Mayor Mine,1000,mean_ndti,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Monte_Mayor_Mine__1000m__mean_ndti.png
+Monte Mayor Mine,1000,mean_ndvi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Monte_Mayor_Mine__1000m__mean_ndvi.png
+Monte Mayor Mine,1000,mean_savi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Monte_Mayor_Mine__1000m__mean_savi.png
+Monte Mayor Mine,1000,mining_soil_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Monte_Mayor_Mine__1000m__mining_soil_pct.png
+Monte Mayor Mine,1000,non_mining_soil_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Monte_Mayor_Mine__1000m__non_mining_soil_pct.png
+Monte Mayor Mine,1000,valid_px_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Monte_Mayor_Mine__1000m__valid_px_pct.png
+Monte Mayor Mine,2000,bare_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Monte_Mayor_Mine__2000m__bare_pct.png
+Monte Mayor Mine,2000,mean_bsi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Monte_Mayor_Mine__2000m__mean_bsi.png
+Monte Mayor Mine,2000,mean_ndbi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Monte_Mayor_Mine__2000m__mean_ndbi.png
+Monte Mayor Mine,2000,mean_ndmi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Monte_Mayor_Mine__2000m__mean_ndmi.png
+Monte Mayor Mine,2000,mean_ndti,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Monte_Mayor_Mine__2000m__mean_ndti.png
+Monte Mayor Mine,2000,mean_ndvi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Monte_Mayor_Mine__2000m__mean_ndvi.png
+Monte Mayor Mine,2000,mean_savi,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Monte_Mayor_Mine__2000m__mean_savi.png
+Monte Mayor Mine,2000,mining_soil_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Monte_Mayor_Mine__2000m__mining_soil_pct.png
+Monte Mayor Mine,2000,non_mining_soil_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Monte_Mayor_Mine__2000m__non_mining_soil_pct.png
+Monte Mayor Mine,2000,valid_px_pct,40,/Users/EthanBrouwer/Documents/Projects/dig-eco/analysis/figures/mrds_trends_part_0/Monte_Mayor_Mine__2000m__valid_px_pct.png
