@@ -3,6 +3,11 @@
 Generate dependency-free PNG trend charts from MRDS clean CSV output.
 
 Designed for offline environments where matplotlib is unavailable.
+Every chart includes:
+- title
+- x-axis label
+- y-axis label
+- numeric tick labels
 
 Usage:
   python analysis/mrds_plot_png.py \
@@ -22,7 +27,6 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-
 DEFAULT_METRICS = [
     "mean_ndvi",
     "mean_ndmi",
@@ -41,6 +45,54 @@ DEFAULT_METRICS = [
 class Point:
     x: int
     y: float
+
+
+FONT_5X7: dict[str, list[str]] = {
+    " ": ["00000"] * 7,
+    "-": ["00000", "00000", "00000", "11111", "00000", "00000", "00000"],
+    "_": ["00000", "00000", "00000", "00000", "00000", "00000", "11111"],
+    ".": ["00000", "00000", "00000", "00000", "00000", "00110", "00110"],
+    ":": ["00000", "00110", "00110", "00000", "00110", "00110", "00000"],
+    "(": ["00010", "00100", "01000", "01000", "01000", "00100", "00010"],
+    ")": ["01000", "00100", "00010", "00010", "00010", "00100", "01000"],
+    "%": ["11001", "11010", "00100", "01000", "10110", "00110", "00000"],
+    "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
+    "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
+    "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
+    "3": ["11110", "00001", "00001", "01110", "00001", "00001", "11110"],
+    "4": ["00010", "00110", "01010", "10010", "11111", "00010", "00010"],
+    "5": ["11111", "10000", "11110", "00001", "00001", "10001", "01110"],
+    "6": ["00110", "01000", "10000", "11110", "10001", "10001", "01110"],
+    "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
+    "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
+    "9": ["01110", "10001", "10001", "01111", "00001", "00010", "11100"],
+    "A": ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
+    "B": ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
+    "C": ["01110", "10001", "10000", "10000", "10000", "10001", "01110"],
+    "D": ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
+    "E": ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
+    "F": ["11111", "10000", "10000", "11110", "10000", "10000", "10000"],
+    "G": ["01110", "10001", "10000", "10111", "10001", "10001", "01110"],
+    "H": ["10001", "10001", "10001", "11111", "10001", "10001", "10001"],
+    "I": ["01110", "00100", "00100", "00100", "00100", "00100", "01110"],
+    "J": ["00001", "00001", "00001", "00001", "10001", "10001", "01110"],
+    "K": ["10001", "10010", "10100", "11000", "10100", "10010", "10001"],
+    "L": ["10000", "10000", "10000", "10000", "10000", "10000", "11111"],
+    "M": ["10001", "11011", "10101", "10001", "10001", "10001", "10001"],
+    "N": ["10001", "11001", "10101", "10011", "10001", "10001", "10001"],
+    "O": ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
+    "P": ["11110", "10001", "10001", "11110", "10000", "10000", "10000"],
+    "Q": ["01110", "10001", "10001", "10001", "10101", "10010", "01101"],
+    "R": ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
+    "S": ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
+    "T": ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
+    "U": ["10001", "10001", "10001", "10001", "10001", "10001", "01110"],
+    "V": ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
+    "W": ["10001", "10001", "10001", "10001", "10101", "11011", "10001"],
+    "X": ["10001", "10001", "01010", "00100", "01010", "10001", "10001"],
+    "Y": ["10001", "10001", "01010", "00100", "00100", "00100", "00100"],
+    "Z": ["11111", "00001", "00010", "00100", "01000", "10000", "11111"],
+}
 
 
 def parse_float(value: str | None) -> float | None:
@@ -81,18 +133,13 @@ def write_png_rgb(path: Path, width: int, height: int, rgb: bytearray) -> None:
     raw = bytearray()
     row_bytes = width * 3
     for y in range(height):
-        raw.append(0)  # filter type 0
+        raw.append(0)
         start = y * row_bytes
         raw.extend(rgb[start : start + row_bytes])
 
     png = bytearray()
     png.extend(b"\x89PNG\r\n\x1a\n")
-    png.extend(
-        chunk(
-            b"IHDR",
-            struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0),  # RGB
-        )
-    )
+    png.extend(chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)))
     png.extend(chunk(b"IDAT", zlib.compress(bytes(raw), level=9)))
     png.extend(chunk(b"IEND", b""))
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -139,9 +186,7 @@ class Canvas:
                 err += dx
                 y0 += sy
 
-    def rect_outline(
-        self, x0: int, y0: int, x1: int, y1: int, color: tuple[int, int, int]
-    ) -> None:
+    def rect_outline(self, x0: int, y0: int, x1: int, y1: int, color: tuple[int, int, int]) -> None:
         self.line(x0, y0, x1, y0, color)
         self.line(x1, y0, x1, y1, color)
         self.line(x1, y1, x0, y1, color)
@@ -152,16 +197,7 @@ class Canvas:
         y = 0
         err = 1 - x
         while x >= y:
-            for px, py in (
-                (x, y),
-                (y, x),
-                (-y, x),
-                (-x, y),
-                (-x, -y),
-                (-y, -x),
-                (y, -x),
-                (x, -y),
-            ):
+            for px, py in ((x, y), (y, x), (-y, x), (-x, y), (-x, -y), (-y, -x), (y, -x), (x, -y)):
                 self.set(cx + px, cy + py, color)
             y += 1
             if err < 0:
@@ -169,6 +205,33 @@ class Canvas:
             else:
                 x -= 1
                 err += 2 * (y - x) + 1
+
+    def draw_char(self, x: int, y: int, ch: str, color: tuple[int, int, int], scale: int = 1) -> None:
+        glyph = FONT_5X7.get(ch, FONT_5X7[" "])
+        for gy, row in enumerate(glyph):
+            for gx, bit in enumerate(row):
+                if bit != "1":
+                    continue
+                for sy in range(scale):
+                    for sx in range(scale):
+                        self.set(x + gx * scale + sx, y + gy * scale + sy, color)
+
+    def draw_text(self, x: int, y: int, text: str, color: tuple[int, int, int], scale: int = 1) -> None:
+        cursor_x = x
+        for ch in text:
+            self.draw_char(cursor_x, y, ch, color, scale=scale)
+            cursor_x += (5 * scale) + scale
+
+
+def text_width(text: str, scale: int = 1) -> int:
+    if not text:
+        return 0
+    return len(text) * (5 * scale + scale) - scale
+
+
+def safe_label_text(text: str) -> str:
+    t = text.upper().replace("|", " ").replace("/", " ")
+    return "".join(ch if ch in FONT_5X7 else " " for ch in t)
 
 
 def ols_fit(points: list[Point]) -> tuple[float, float] | None:
@@ -189,6 +252,9 @@ def ols_fit(points: list[Point]) -> tuple[float, float] | None:
 def draw_series_png(
     output_png: Path,
     points: list[Point],
+    title: str,
+    x_label: str,
+    y_label: str,
     width: int = 1100,
     height: int = 700,
 ) -> None:
@@ -196,10 +262,10 @@ def draw_series_png(
         return
 
     canvas = Canvas(width, height)
-    margin_l = 90
+    margin_l = 130
     margin_r = 40
-    margin_t = 40
-    margin_b = 80
+    margin_t = 95
+    margin_b = 120
     plot_x0 = margin_l
     plot_y0 = margin_t
     plot_x1 = width - margin_r
@@ -223,12 +289,12 @@ def draw_series_png(
     for i in range(1, 6):
         y = plot_y0 + int(i * plot_h / 6)
         canvas.line(plot_x0, y, plot_x1, y, grid)
+
     year_span = max_x - min_x
-    x_ticks = min(year_span, 10)
-    if x_ticks > 0:
-        for i in range(1, x_ticks):
-            x = plot_x0 + int(i * plot_w / x_ticks)
-            canvas.line(x, plot_y0, x, plot_y1, grid)
+    x_ticks = min(max(year_span, 2), 6)
+    for i in range(1, int(x_ticks)):
+        x = plot_x0 + int(i * plot_w / x_ticks)
+        canvas.line(x, plot_y0, x, plot_y1, grid)
 
     # axis
     axis = (60, 60, 60)
@@ -239,6 +305,25 @@ def draw_series_png(
 
     def ypix(y: float) -> int:
         return plot_y1 - int((y - min_y) / (max_y - min_y) * plot_h)
+
+    # axis ticks + labels
+    tick_c = (80, 80, 80)
+    for i in range(int(x_ticks) + 1):
+        t = i / int(x_ticks)
+        xv = int(round(min_x + t * (max_x - min_x)))
+        xp = xpix(xv)
+        canvas.line(xp, plot_y1, xp, plot_y1 + 8, tick_c)
+        lbl = safe_label_text(str(xv))
+        canvas.draw_text(xp - text_width(lbl) // 2, plot_y1 + 16, lbl, tick_c, scale=1)
+
+    y_ticks = 6
+    for i in range(y_ticks + 1):
+        t = i / y_ticks
+        yv = max_y - t * (max_y - min_y)
+        yp = plot_y0 + int(t * plot_h)
+        canvas.line(plot_x0 - 8, yp, plot_x0, yp, tick_c)
+        lbl = safe_label_text(f"{yv:.2f}")
+        canvas.draw_text(plot_x0 - 10 - text_width(lbl), yp - 4, lbl, tick_c, scale=1)
 
     # series
     line_c = (36, 99, 235)
@@ -256,6 +341,16 @@ def draw_series_png(
         y0 = slope * min_x + intercept
         y1 = slope * max_x + intercept
         canvas.line(xpix(min_x), ypix(y0), xpix(max_x), ypix(y1), (216, 27, 96))
+
+    # labels
+    txt_c = (35, 35, 35)
+    title_txt = safe_label_text(title)
+    x_txt = safe_label_text(x_label)
+    y_txt = safe_label_text(y_label)
+    canvas.draw_text((width - text_width(title_txt, 2)) // 2, 20, title_txt, txt_c, scale=2)
+    canvas.draw_text((width - text_width(x_txt, 2)) // 2, height - 48, x_txt, txt_c, scale=2)
+    canvas.draw_text(10, 16, y_txt, txt_c, scale=1)
+    canvas.draw_text(10, 30, safe_label_text("TREND LINE = OLS"), (216, 27, 96), scale=1)
 
     write_png_rgb(output_png, width, height, canvas.px)
 
@@ -296,11 +391,16 @@ def main() -> None:
         points.sort(key=lambda p: p.x)
         if len(points) < 2:
             continue
-        filename = (
-            f"{clean_slug(site_name)}__{clean_slug(buffer_m)}m__{clean_slug(metric)}.png"
-        )
+        filename = f"{clean_slug(site_name)}__{clean_slug(buffer_m)}m__{clean_slug(metric)}.png"
         out_png = outdir / filename
-        draw_series_png(out_png, points)
+        metric_label = metric.replace("_", " ")
+        draw_series_png(
+            out_png,
+            points,
+            title=f"{site_name} | {metric_label} | {buffer_m} m buffer",
+            x_label="Year",
+            y_label=f"Value ({metric_label})",
+        )
         manifest_rows.append(
             {
                 "site_name": site_name,
