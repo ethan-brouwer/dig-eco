@@ -43,14 +43,14 @@ var cfg = {
   // Memory controls
   singleSiteId: null,     // e.g. "12345" for one-site debugging
   singleSiteName: null,   // set exact Name field value for one-site debugging
-  sitePartitionCount: 1,  // set >1 to split sites into partitions
-  sitePartitionIndex: 0,  // 0-based partition index
+  sitePartitionCount: 4,  // split into 4 partitions for faster exports
+  sitePartitionIndex: 0,  // run 0,1,2,3 in separate tasks
   exportPerYear: false,   // one CSV per year (many tasks)
   exportSiteSeries: true, // one CSV with all selected years for current scope
   previewSeriesFirstRow: false, // can trigger memory errors on large jobs
   processingRegionMode: "site", // "site" (default) or "country"
   limitInputsToExportWindow: true, // prefilter Landsat time range for faster runs
-  maxImagesPerSeason: 40, // cap images used in each seasonal composite
+  maxImagesPerSeason: 15, // lower cap for faster seasonal composites
 
   // Seasonal compositing window (El Salvador default: dry season Nov-Apr)
   seasonStartMonth: 11,
@@ -78,7 +78,7 @@ var cfg = {
   exportPrefixWide: "mrds_mine_disturbance_wide",
 
   // Runtime
-  scale: 30
+  scale: 60
 };
 
 // Landsat C2 L2 collections used by analysis year.

@@ -1,0 +1,120 @@
+Monte Mayor Mine Research Report (for MRDS + Remote Sensing Workflow)
+Date: 2026-02-17
+Prepared by: Codex (GPT-5)
+
+Scope
+- Provide the remaining mine profile for the `part_0_of_4` cohort.
+- Focus on historical context, commodity/mineralization, geology, and environmental interpretation relevance.
+- Explicitly flag where evidence is strong vs. uncertain.
+
+Context: `part_0_of_4` site membership
+- Divisadero Mine (already reported)
+- El Porvenir (already reported)
+- Monte Mayor Mine (this report)
+
+-------------------------------------------------------------------------------
+1) MRDS Record Snapshot Used in Project
+-------------------------------------------------------------------------------
+From the project MRDS CSV row for Monte Mayor Mine:
+- Name: Monte Mayor Mine
+- MRDS labno: 10085940
+- Coordinates: 13.70090, -87.97002
+- Development status: Past Producer
+- Operation type: Unknown
+- Ore: Gold
+- commod1: Gold, Silver
+
+Interpretation:
+- Legacy Au-Ag producer (historical mining has occurred).
+- Suitable for inclusion in long-run disturbance/recovery trend analysis.
+
+-------------------------------------------------------------------------------
+2) Historical Context (Evidence-Graded)
+-------------------------------------------------------------------------------
+2.1 High-confidence records
+- USGS Circular 858-A (1981) includes "MONTE MAYOR" in the El Salvador metallic occurrence list, with commodities AU-AG and coordinates N13 42, W087 58.
+- Your MRDS row classifies Monte Mayor as "Past Producer," confirming historical extraction occurred at some point.
+
+2.2 Moderate-confidence contextual records
+- USGS-linked secondary aggregation (The Diggings entry keyed to USGS 10085940) identifies Monte Mayor as a small Au-Ag site with historical alternate names (Santa Gertrudia, Carao, Tempisque, Banadeto, Las Tunas Veins), suggesting a broader local vein/working-name system rather than a single isolated working.
+
+2.3 Key uncertainty
+- Publicly accessible sources reviewed do not provide a robust year-by-year Monte Mayor production chronology (start/stop years, tonnage, grade by year) at the same depth available for some neighboring mines.
+- Therefore, detailed annual operations timeline for Monte Mayor remains a data gap.
+
+Working historical synthesis:
+- Monte Mayor is defensibly a historical Au-Ag producer in eastern El Salvador, but exact operational sequencing is not well constrained in open sources used here.
+
+-------------------------------------------------------------------------------
+3) Geology and Mineralization Relevance
+-------------------------------------------------------------------------------
+High-confidence (from MRDS + USGS listing level):
+- Commodity class: Au-Ag.
+
+Moderate-confidence (secondary USGS-linked aggregation):
+- Host/associated rock described as volcanic, aphanitic volcanic rock.
+- Ore role listed as gold-dominant.
+
+Interpretation for RS:
+- Volcanic-hosted Au-Ag workings can show mixed spectral behavior depending on vegetation recovery, soil exposure, and seasonal moisture.
+- Your current index set is appropriate:
+  - NDVI/SAVI for vegetation recovery/disturbance,
+  - NDMI for moisture shifts,
+  - NDBI/BSI/NDTI for exposed/disturbed surface behavior.
+
+-------------------------------------------------------------------------------
+4) Environmental Context and Risk Framing
+-------------------------------------------------------------------------------
+Site-specific evidence:
+- I did not find strong direct, recent public chemistry datasets uniquely tied to Monte Mayor in the reviewed open sources.
+
+Regional framing:
+- Neighboring eastern El Salvador districts have documented legacy mining-related environmental concerns in public/government discourse.
+- Use this as contextual risk only; avoid claiming Monte Mayor-specific contamination without direct site evidence.
+
+-------------------------------------------------------------------------------
+5) Why Monte Mayor Matters in Your Actual Trend Results
+-------------------------------------------------------------------------------
+From your own `part_0_of_4` processed trends, Monte Mayor stands out as a top long-run changer:
+- `mean_ndvi` (2000 m): +0.357 from 1984 to 2025 (largest long-run change in part 0)
+- `mean_ndvi` (1000 m): +0.339 from 1984 to 2025
+- `mean_bsi` (2000 m): -0.241
+- `mean_ndmi` (2000 m): +0.233
+- `mean_ndbi` (2000 m): -0.233
+
+Interpretation (screening-level):
+- Pattern is consistent with long-term vegetation recovery and reduced exposed/built-like spectral response, but this should be treated as inferential until tied to site-specific land-use/field evidence.
+
+-------------------------------------------------------------------------------
+6) Recommended Next Steps for Monte Mayor
+-------------------------------------------------------------------------------
+1. Prioritize Monte Mayor for deeper archive work (historic company reports, government mining registries, old geologic maps).
+2. Keep Monte Mayor in your high-priority RS anomaly review set (it has strong long-run multi-index movement).
+3. Add an evidence-confidence field in your team tables:
+   - A = direct primary source,
+   - B = secondary but source-linked,
+   - C = contextual/indirect.
+4. For publication-quality claims, avoid specific operation-year statements unless independently verified.
+
+-------------------------------------------------------------------------------
+7) Sources
+-------------------------------------------------------------------------------
+Primary / high-value:
+1. USGS Circular 858-A (1981), El Salvador list includes MONTE MAYOR (AU-AG)
+   https://pubs.usgs.gov/circ/1981/0858a/report.pdf
+
+2. Project MRDS source row (local dataset used by workflow)
+   /Users/EthanBrouwer/Documents/Projects/asm/USGS_MRDS.csv
+
+Secondary (USGS-linked aggregation / contextual detail):
+3. Monte Mayor Mine (USGS-linked record summary)
+   https://thediggings.com/mines/usgs10085940
+
+Related district context:
+4. Northern Miner (2004) San Cristobal project drilling context in nearby historical mines
+   https://northernminer.com/news/intrepid-proves-up-salvadoran-project/1000156911/
+
+Evidence quality notes:
+- Sources 1-2 are strongest for this report.
+- Source 3 is useful for aliases/host-rock hints but should be treated as secondary.
+- Source 4 is district context and not a direct Monte Mayor operations ledger.

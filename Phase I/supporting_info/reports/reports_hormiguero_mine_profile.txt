@@ -1,0 +1,130 @@
+Hormiguero Mine Research Report (for MRDS + Remote Sensing Workflow)
+Date: 2026-02-16
+Prepared by: Codex (GPT-5)
+
+Scope
+- Produce the next mine profile after El Porvenir, focused on Hormiguero Mine.
+- Emphasize historical timeline, commodity/mineralization, environmental risk context, and implications for long-run RS trend analysis.
+- Separate high-confidence statements from contextual or lower-confidence narrative material.
+
+-------------------------------------------------------------------------------
+1) MRDS Record Snapshot Used in Project
+-------------------------------------------------------------------------------
+From the project MRDS CSV row labeled "Hormiguero Mine":
+- Name: Hormiguero Mine
+- MRDS labno: 10106485
+- Coordinates: 13.53091, -88.06002
+- Development status: Past Producer
+- Operation type: Unknown
+- Ore minerals listed: Chalcopyrite, Galena, Gold, Malachite, Pyrite, Sphalerite
+- commod1: Gold, Silver
+
+Interpretation for workflow:
+- This is a legacy polymetallic Au-Ag site with Cu-Pb-Zn sulfide association.
+- The ore suite supports including both vegetation trends and bare/soil and moisture indices in your RS output.
+
+-------------------------------------------------------------------------------
+2) Historical Timeline (Evidence-Graded)
+-------------------------------------------------------------------------------
+High-confidence (USGS Yearbook + industry reporting):
+- By 2002, USGS Minerals Yearbook reported that Intrepid’s San Cristobal concessions hosted former producers including Hormiguero and that these mines were worked intermittently from approximately 1900 to 1950.
+- By 2004, Northern Miner reported modern drilling at Hormiguero beneath historical mine workings along the Guadalupe vein.
+
+Moderate-confidence (local historical reporting, oral-history based):
+- Local reporting in El Salvador describes major mining activity in El Hormiguero from late 19th to early 20th century, with processing infrastructure in the canton and labor tied to Comacarán Gold Mining Co. and Butters-era operations.
+- The same reporting describes a transition where foreign-company extraction reportedly ceased around 1930, followed by intermittent local/family-linked exploitation until around 1948.
+
+Working synthesis:
+- The most defensible operational window is "intermittent production in the first half of the 20th century," with site-level evidence strongest for 1900-1950 and weaker precision on exact annual stop/start intervals.
+
+-------------------------------------------------------------------------------
+3) Geology and Mineralization Signals Relevant to RS
+-------------------------------------------------------------------------------
+3.1 Commodity and ore signature
+- MRDS commodity/ore fields indicate:
+  - Precious metals: Au-Ag
+  - Base-metal sulfides: chalcopyrite, galena, sphalerite, pyrite
+  - Oxidation indicator: malachite
+
+Implication:
+- This assemblage is consistent with hydrothermal polymetallic vein-style systems and can produce mixed spectral behavior depending on oxidation state, moisture, and cover.
+
+3.2 Structural and exploration context
+- Northern Miner (2004) reports drilling under historical Hormiguero workings following the Guadalupe vein and notes gold-silver-copper mineralization and silicification, with fault-related depth variation.
+
+Implication:
+- For trend work, this supports keeping disturbance + moisture + bare-soil indices together:
+  - NDVI / SAVI for vegetation recovery/loss,
+  - NDMI for moisture response,
+  - NDBI/BSI/NDTI for exposed or altered surface signatures.
+
+-------------------------------------------------------------------------------
+4) Environmental and Health Context
+-------------------------------------------------------------------------------
+High-confidence for this specific site:
+- Direct, formal, recent public chemistry datasets tied specifically to Hormiguero were not identified in the sources reviewed.
+
+Moderate-confidence community evidence:
+- Local reporting compiles testimonies alleging long-term health effects among former mine-worker families and historical use of toxic processing chemicals in the district.
+
+Use in your research design:
+- Treat these claims as important screening context, not final proof.
+- Use RS trends to detect candidate disturbance/recovery periods, then pair with targeted archival or field/lab validation if you need causal claims.
+
+-------------------------------------------------------------------------------
+5) Historical Detail for Interpretation Windows
+-------------------------------------------------------------------------------
+Suggested periodization for Hormiguero trend interpretation:
+
+1. Historical extraction era (pre-Landsat; approx. 1900-1950)
+- Main production legacy likely created major disturbance footprint before satellite-era observation.
+
+2. Post-production legacy landscape (Landsat era start: 1984)
+- Expected signals: partial revegetation, residual bare surfaces, and land-use conversion around former workings/processing areas.
+
+3. Modern re-exploration context (early 2000s onward)
+- Drilling and renewed exploration interest may create localized disturbances that are smaller than historical production-era effects.
+
+4. Policy transition period (2017 ban, December 23, 2024 legal reversal)
+- Interpret post-2024 observations as a distinct policy era; do not merge with pre-ban trends without noting regime change.
+
+-------------------------------------------------------------------------------
+6) Recommendations for Your Ongoing Workflow
+-------------------------------------------------------------------------------
+1. Keep Hormiguero in the manual target list for your fast partitioned GEE script.
+2. Preserve 1 km and 2 km buffers, but prioritize 1 km for direct footprint analysis and 2 km for secondary effects.
+3. In post-processing, add confidence labels to each historical claim:
+   - A: USGS Yearbook and formal technical reporting
+   - B: Industry press exploration reports
+   - C: oral-history/community journalism
+4. In report figures, annotate key timeline markers:
+   - 1900-1950 intermittent historical working (A)
+   - 2004 modern drilling below old workings (B)
+   - 2017 mining ban and 2024 law change (A for policy date)
+
+-------------------------------------------------------------------------------
+7) Sources
+-------------------------------------------------------------------------------
+Primary / high-value:
+1. USGS Minerals Yearbook 2002 (Central America) – includes statement that Hormiguero and nearby mines were worked intermittently from 1900 to 1950
+   https://d9-wret.s3.us-west-2.amazonaws.com/assets/palladium/production/mineral-pubs/country/2002/camermyb02.pdf
+
+2. MRDS source row used in this project (local dataset)
+   /Users/EthanBrouwer/Documents/Projects/asm/USGS_MRDS.csv
+
+3. Northern Miner (2004): San Cristobal drilling below Hormiguero workings on Guadalupe vein
+   https://northernminer.com/news/intrepid-proves-up-salvadoran-project/1000156911/
+
+Contextual / supplemental:
+4. El Salvador.com (2025): local historical and community-health narrative on El Hormiguero district
+   https://www.elsalvador.com/noticias/nacional/mina-el-hormiguero-san-miguel-comacaran/1203640/2025/
+
+5. El Salvador.com (2025): architectural/historical note linking Comacarán Gold Mining Co. labor and 1909-1918 period infrastructure in El Hormiguero
+   https://www.elsalvador.com/entretenimiento/arte-y-cultura/iglesia-nuestra-senora-de-guadalupe-comacaran/1243105/2025/
+
+6. U.S. Commerce market-intelligence note on metallic-mining law change (approved Dec 23, 2024)
+   https://www.trade.gov/market-intelligence/el-salvador-industrial-materials-metallic-mining-law
+
+Evidence quality note:
+- Source 1 is strongest for historical-operational framing.
+- Sources 4-5 are valuable local context but should be treated as secondary for quantitative historical claims.

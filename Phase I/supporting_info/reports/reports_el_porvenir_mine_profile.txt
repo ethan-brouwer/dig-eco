@@ -1,0 +1,112 @@
+El Porvenir Mine Research Report (for MRDS + Remote Sensing Workflow)
+Date: 2026-02-16
+Prepared by: Codex (GPT-5)
+
+Scope
+- Provide the next mine-profile report in sequence after Divisadero, focused on El Porvenir.
+- Prioritize operation history, commodity suite, geology, environmental context, and implications for your RS trend workflow.
+- Document data-quality and site-identity uncertainty explicitly.
+
+-------------------------------------------------------------------------------
+1) MRDS Record Snapshot Used in Project
+-------------------------------------------------------------------------------
+From the project MRDS CSV row labeled "El Porvenir":
+- Name: El Porvenir
+- MRDS labno: 10086042
+- Coordinates: 13.70201, -87.76196
+- Development status: Past Producer
+- Operation type: Unknown
+- Ore: Gold
+- commod1: Gold
+- commod2: Copper, Zinc, Lead, Silver
+
+Interpretation:
+- This is a polymetallic gold-centered record (Au primary, base-metal + Ag association).
+- It is valid for inclusion as a legacy-mined target in a screening workflow.
+
+-------------------------------------------------------------------------------
+2) Critical Data-Identity Finding (High Importance)
+-------------------------------------------------------------------------------
+There are multiple "El Porvenir" mines/localities globally. For this MRDS row, source cross-checking indicates potential country ambiguity:
+
+- The Diggings page tied to USGS ID 10086042 places this mine near Nacaome, Honduras and repeats commodity context consistent with your MRDS row.
+- USGS Circular 858-A (Preliminary Metallogenic Map listing) includes "EL PORVENIR" in the Honduras section but does not include El Porvenir in the El Salvador section (which lists San Juan, El Dorado, Potosi, Laguna de Alegria, Montecristo/Divisadero, Hormiguero, Monte Mayor, San Sebastian).
+- Northern Miner coverage of the San Cristobal district in El Salvador identifies four past producers (Encuentros, Hormiguero, Divisadero, Montecristo), again not naming El Porvenir there.
+
+Working conclusion:
+- The MRDS row used in your table appears to be a real past producer, but there is substantial risk that it is not an El Salvador mine record.
+- Before interpreting trends as "El Salvador mine-site trends," this specific site should be geospatially validated against an official boundary and original MRDS record page.
+
+-------------------------------------------------------------------------------
+3) Operations, Commodity and Geology (What Can Be Defended)
+-------------------------------------------------------------------------------
+3.1 Operations timeline
+- Confirmed from your MRDS row: Past Producer.
+- Publicly accessible sources reviewed here do not provide a robust year-by-year operating timeline for this specific labno.
+- Therefore: operation-year precision remains a data gap.
+
+3.2 Commodity signature
+- Primary: Gold.
+- Associated: Copper, zinc, lead, silver.
+- This supports using both vegetation/disturbance indices and bare/soil proxy indices in RS analysis.
+
+3.3 Geologic indicators
+- Secondary source tied to this labno (USGS-linked aggregation) describes rhyolitic volcanic host rock and silicification with quartz gangue.
+- Confidence: moderate-to-low until verified against a primary geologic report directly tied to labno 10086042.
+
+Research implication:
+- Because hard primary geology references for this exact record are sparse in open sources, treat geology interpretations as provisional and avoid over-claiming deposit model specifics.
+
+-------------------------------------------------------------------------------
+4) Environmental Context Relevant to Your RS Study
+-------------------------------------------------------------------------------
+Site-specific direct environmental reporting:
+- No strong, directly attributable modern environmental monitoring report was identified for El Porvenir (labno 10086042) in open sources reviewed.
+
+Regional context (use cautiously):
+- Eastern El Salvador districts (e.g., San Sebastian) have documented legacy contamination concerns in public discourse and government-linked reporting.
+- This supports your strategy to use RS time-series as a screening layer for legacy disturbance/recovery, then target field validation.
+
+-------------------------------------------------------------------------------
+5) Recommended Handling in Your Current Workflow
+-------------------------------------------------------------------------------
+Given ambiguity around this record's national assignment:
+
+1. Keep El Porvenir in the manual target list only if its geometry falls within your study-country boundary in GEE.
+2. Add a QA step in exports: include country/boundary membership flag before trend interpretation.
+3. In reporting, label this site as "El Porvenir (MRDS 10086042; location under verification)".
+4. Prioritize confidence labels in downstream tables:
+   - High confidence: commodity, past-producer status.
+   - Medium/low confidence: operation years, detailed geology, jurisdiction.
+
+-------------------------------------------------------------------------------
+6) Sources
+-------------------------------------------------------------------------------
+Primary / high-value for this specific report:
+1. Project MRDS source row (local file used by workflow)
+   /Users/EthanBrouwer/Documents/Projects/asm/USGS_MRDS.csv
+
+2. USGS Circular 858-A PDF (deposit listings by country; El Salvador vs Honduras lists)
+   https://pubs.usgs.gov/circ/1981/0858a/report.pdf
+
+3. USGS-linked record mirror for labno 10086042 (secondary aggregation, includes coordinates and commodity context)
+   https://thediggings.com/mines/usgs10086042
+
+4. San Cristobal district historical exploration context (past producer names in El Salvador district)
+   https://northernminer.com/news/intrepid-proves-up-salvadoran-project/1000156911/
+
+Context-only references (not direct proof for this site):
+5. El Salvador metallic-mining policy update (Dec 23, 2024 law context)
+   https://www.trade.gov/market-intelligence/el-salvador-industrial-materials-metallic-mining-law
+
+Evidence quality notes:
+- Source 2 is strongest for regional historical listing context.
+- Source 3 is useful for this labno but should be treated as secondary to direct MRDS pages.
+- Source 4 is district-level context, not a direct mine file for labno 10086042.
+
+-------------------------------------------------------------------------------
+7) Next Validation Step (Recommended before final publication)
+-------------------------------------------------------------------------------
+- Programmatically verify whether point (13.70201, -87.76196) is inside El Salvador boundary used in GEE.
+- If outside, remove from El Salvador mine cohort and reclassify in a cross-border appendix.
+- If inside, retain and proceed with full trend extraction.
