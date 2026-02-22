@@ -139,7 +139,7 @@ var recent = compositeWithCounts(recentCol, "Recent");
 var baseline = compositeWithCounts(baselineCol, "Baseline");
 
 // ================= WATER MASK + TURBIDITY =================
-var jrcWater = ee.Image("JRC/GSW1_4/Occurrence");
+var jrcWater = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select("occurrence");
 var permanentWater = jrcWater.gte(50);
 
 function waterMask(img) {
