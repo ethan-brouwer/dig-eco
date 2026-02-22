@@ -23,6 +23,17 @@ var recentMonths = 12;      // "current" window; keeps at least one dry-season p
 var baselineYears = 5;      // prior multi-year baseline for anomaly comparison
 var cloudMax = 60;
 var seasonMonths = [11, 12, 1, 2, 3, 4]; // drier season often better for turbidity visibility
+var useSeasonFilterForCurrentMaps = true;
+
+// Upstream/downstream proxy corridor settings (user-tunable)
+// Azimuth is downstream direction in degrees clockwise from north.
+// Set from local river direction after visual inspection.
+var downstreamAzimuthDeg = 110;
+var riverCorridorExpandMeters = 120;
+
+// Time-series settings
+var seriesYears = 3;
+var useSeasonFilterForTimeSeries = false; // monthly tracking usually should include all months
 
 // ================= MAP SETUP =================
 Map.setOptions("SATELLITE");
@@ -115,16 +126,20 @@ function addIndices(img) {
   ]);
 }
 
-function buildS2Collection(start, end) {
-  return ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+function buildS2Collection(start, end, applySeasonFilter) {
+  var col = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
     .filterBounds(aoi)
     .filterDate(start, end)
     .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", cloudMax))
     .map(maskS2)
     .map(scaleS2)
-    .map(addMonth)
-    .filter(ee.Filter.inList("month", seasonMonths))
-    .map(addIndices);
+    .map(addMonth);
+
+  if (applySeasonFilter) {
+    col = col.filter(ee.Filter.inList("month", seasonMonths));
+  }
+
+  return col.map(addIndices);
 }
 
 function compositeWithCounts(col, label) {
@@ -132,11 +147,13 @@ function compositeWithCounts(col, label) {
   return col.median().clip(aoi);
 }
 
-var recentCol = buildS2Collection(recentStart, recentEnd);
-var baselineCol = buildS2Collection(baselineStart, baselineEnd);
+var recentCol = buildS2Collection(recentStart, recentEnd, useSeasonFilterForCurrentMaps);
+var baselineCol = buildS2Collection(baselineStart, baselineEnd, true);
 
 var recent = compositeWithCounts(recentCol, "Recent");
 var baseline = compositeWithCounts(baselineCol, "Baseline");
+var recentObsCount = recentCol.select("B4").count().clip(aoi).rename("RECENT_OBS_COUNT");
+var baselineObsCount = baselineCol.select("B4").count().clip(aoi).rename("BASELINE_OBS_COUNT");
 
 // ================= WATER MASK + TURBIDITY =================
 var jrcWater = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select("occurrence");
@@ -155,6 +172,32 @@ var recentTurbidity = recent.select("TSS_PROXY").updateMask(stableWaterMask).ren
 var baselineTurbidity = baseline.select("TSS_PROXY").updateMask(stableWaterMask).rename("TSS_BASELINE");
 var turbidityAnomaly = recentTurbidity.subtract(baselineTurbidity).rename("TSS_ANOMALY");
 var recentNDTIWater = recent.select("NDTI").updateMask(stableWaterMask).rename("NDTI_WATER");
+
+// ================= HYDROLOGY-ORIENTED PROXY CORRIDORS =================
+// Proxy approach: split a buffered water corridor into upstream/downstream halves
+// using a user-defined downstream azimuth. This is not full flow-routing.
+var riverCorridor = permanentWater.focal_max(riverCorridorExpandMeters, "circle", "meters")
+  .clip(aoi)
+  .selfMask()
+  .rename("RIVER_CORRIDOR");
+
+var azimuthRad = downstreamAzimuthDeg * Math.PI / 180;
+var ux = Math.sin(azimuthRad); // east-west component
+var uy = Math.cos(azimuthRad); // north-south component
+
+var lonLat = ee.Image.pixelLonLat();
+var signedAlong = lonLat.select("longitude").subtract(mineLon).multiply(ux)
+  .add(lonLat.select("latitude").subtract(mineLat).multiply(uy))
+  .rename("SIGNED_ALONG");
+
+var downstreamHalf = signedAlong.gt(0);
+var upstreamHalf = signedAlong.lte(0);
+
+var downstreamCorridor = riverCorridor.and(downstreamHalf).selfMask().rename("DOWNSTREAM_CORRIDOR");
+var upstreamCorridor = riverCorridor.and(upstreamHalf).selfMask().rename("UPSTREAM_CORRIDOR");
+
+var downstreamWaterNow = stableWaterMask.and(downstreamCorridor).selfMask();
+var upstreamWaterNow = stableWaterMask.and(upstreamCorridor).selfMask();
 
 // ================= SCREENING SCORES (RED = HIGHER CONCERN) =================
 function norm(img, min, max) {
@@ -203,6 +246,7 @@ var visRatio = {min: 0.7, max: 2.0, palette: ["f7fbff", "fdae61", "d73027"]};
 var visTurbidity = {min: 20, max: 300, palette: ["08306b", "41b6c4", "ffffbf", "fdae61", "d73027"]};
 var visTurbidityAnom = {min: -80, max: 80, palette: ["2166ac", "f7f7f7", "b2182b"]};
 var visStress = {min: 0, max: 1, palette: ["ffffcc", "fd8d3c", "bd0026"]};      // red = higher screening concern
+var visObsCount = {min: 0, max: 30, palette: ["2b2b2b", "f7f7f7", "00ff00"]};
 
 // ================= MAP LAYERS =================
 Map.addLayer(recent, visTrueColor, "Recent composite (true color)", true);
@@ -222,15 +266,22 @@ Map.addLayer(recent.select("CLAY"), {min: 0.8, max: 1.6, palette: ["f7fcf0", "ad
 
 // Water and turbidity
 Map.addLayer(stableWaterMask.selfMask(), {palette: ["00BFFF"]}, "Stable water mask", false);
+Map.addLayer(riverCorridor, {palette: ["80DEEA"]}, "River corridor (proxy buffer)", false);
+Map.addLayer(upstreamCorridor, {palette: ["1E88E5"]}, "Upstream proxy corridor", false);
+Map.addLayer(downstreamCorridor, {palette: ["E53935"]}, "Downstream proxy corridor", false);
 Map.addLayer(recentTurbidity, visTurbidity, "Turbidity/TSS proxy (water)", true);
 Map.addLayer(turbidityAnomaly, visTurbidityAnom, "Turbidity anomaly vs baseline (red=increased)", true);
 Map.addLayer(recentNDTIWater, {min: -0.1, max: 0.3, palette: ["2166ac", "f7f7f7", "d73027"]}, "Water NDTI (discoloration)", false);
+Map.addLayer(upstreamWaterNow, {palette: ["2962FF"]}, "Upstream water (current)", false);
+Map.addLayer(downstreamWaterNow, {palette: ["FF1744"]}, "Downstream water (current)", false);
 
 // Screening layers (red-forward for quick issue scan)
 Map.addLayer(landStress, visStress, "Land mine-impact screening (red=high)", true);
 Map.addLayer(waterStress, visStress, "Water contamination screening (red=high)", true);
 Map.addLayer(combinedScreen, visStress, "Combined environmental screening (red=high)", true);
 Map.addLayer(hotSpots, {palette: ["FF0000"]}, "Hotspots > 0.65", true);
+Map.addLayer(recentObsCount, visObsCount, "QA: recent observation count", false);
+Map.addLayer(baselineObsCount, visObsCount, "QA: baseline observation count", false);
 
 // Optional contextual layer: current bare ground cover class
 var worldCover = ee.Image("ESA/WorldCover/v200/2021");
@@ -260,6 +311,9 @@ panel.add(ui.Label("[x] Ferrous proxy ratio"));
 panel.add(ui.Label("[x] Clay/alteration proxy ratio"));
 panel.add(ui.Label("[x] Baseline-vs-current turbidity anomaly"));
 panel.add(ui.Label("[x] Red hotspot screening layers"));
+panel.add(ui.Label("[x] Upstream/downstream proxy river corridor split"));
+panel.add(ui.Label("[x] Monthly upstream vs downstream time-series charts"));
+panel.add(ui.Label("[x] QA observation-count layers"));
 
 panel.add(ui.Label({
   value: "Red means higher screening concern (disturbance/stress/turbidity proxy), not confirmed sulfide/nickel concentration.",
@@ -270,6 +324,184 @@ Map.add(panel);
 
 print("NOTE: Sulfide, nickel, gold, and dissolved metals require water/soil chemistry sampling.");
 print("This script is for remote sensing triage and hotspot targeting.");
+
+// ================= MONTHLY UPSTREAM/DOWNSTREAM TIME SERIES =================
+function maskedMean(img, bandName, maskImg) {
+  var stats = img.select(bandName).updateMask(maskImg).reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: aoi,
+    scale: 10,
+    bestEffort: true,
+    maxPixels: 1e9
+  });
+  return stats.get(bandName);
+}
+
+var seriesStart = ee.Date(now.advance(-seriesYears, "year").format("YYYY-MM-01"));
+var monthCount = ee.Number(now.difference(seriesStart, "month")).floor();
+var monthOffsets = ee.List.sequence(0, monthCount.subtract(1));
+
+var monthlyStats = ee.FeatureCollection(monthOffsets.map(function(m) {
+  m = ee.Number(m);
+  var start = seriesStart.advance(m, "month");
+  var end = start.advance(1, "month");
+  var col = buildS2Collection(start, end, useSeasonFilterForTimeSeries);
+  var count = col.size();
+
+  var precip = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
+    .filterBounds(aoi)
+    .filterDate(start, end)
+    .sum();
+  var rainMm = precip.reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: aoi,
+    scale: 5000,
+    bestEffort: true,
+    maxPixels: 1e9
+  }).get("precipitation");
+
+  var emptyFeature = ee.Feature(null, {
+    "system:time_start": start.millis(),
+    date: start.format("YYYY-MM"),
+    img_count: count,
+    rain_mm: rainMm,
+    up_tss: null,
+    down_tss: null,
+    up_ndti_w: null,
+    down_ndti_w: null,
+    up_minus_down_tss: null,
+    down_minus_up_tss: null,
+    up_obs_px: 0,
+    down_obs_px: 0
+  });
+
+  var populatedFeature = ee.Feature(ee.Algorithms.If(count.gt(0), (function() {
+    var img = ee.Image(col.median()).clip(aoi);
+    var w = waterMask(img);
+    var upMask = w.and(upstreamCorridor);
+    var downMask = w.and(downstreamCorridor);
+
+    var upTss = maskedMean(img, "TSS_PROXY", upMask);
+    var downTss = maskedMean(img, "TSS_PROXY", downMask);
+    var upNDTI = maskedMean(img, "NDTI", upMask);
+    var downNDTI = maskedMean(img, "NDTI", downMask);
+
+    var upObsPx = ee.Number(upMask.reduceRegion({
+      reducer: ee.Reducer.count(),
+      geometry: aoi,
+      scale: 10,
+      bestEffort: true,
+      maxPixels: 1e9
+    }).get("NDWI", 0));
+
+    var downObsPx = ee.Number(downMask.reduceRegion({
+      reducer: ee.Reducer.count(),
+      geometry: aoi,
+      scale: 10,
+      bestEffort: true,
+      maxPixels: 1e9
+    }).get("NDWI", 0));
+
+    var upMinusDown = ee.Algorithms.If(
+      ee.Algorithms.IsEqual(upTss, null),
+      null,
+      ee.Algorithms.If(ee.Algorithms.IsEqual(downTss, null), null,
+        ee.Number(upTss).subtract(ee.Number(downTss)))
+    );
+
+    var downMinusUp = ee.Algorithms.If(
+      ee.Algorithms.IsEqual(upTss, null),
+      null,
+      ee.Algorithms.If(ee.Algorithms.IsEqual(downTss, null), null,
+        ee.Number(downTss).subtract(ee.Number(upTss)))
+    );
+
+    return ee.Feature(null, {
+      "system:time_start": start.millis(),
+      date: start.format("YYYY-MM"),
+      img_count: count,
+      rain_mm: rainMm,
+      up_tss: upTss,
+      down_tss: downTss,
+      up_ndti_w: upNDTI,
+      down_ndti_w: downNDTI,
+      up_minus_down_tss: upMinusDown,
+      down_minus_up_tss: downMinusUp,
+      up_obs_px: upObsPx,
+      down_obs_px: downObsPx
+    });
+  })(), emptyFeature));
+
+  return populatedFeature;
+})).sort("system:time_start");
+
+print("Monthly upstream/downstream stats table", monthlyStats.limit(12));
+
+var tssChart = ui.Chart.feature.byFeature(monthlyStats, "date", ["up_tss", "down_tss"])
+  .setChartType("LineChart")
+  .setOptions({
+    title: "Monthly Water TSS Proxy (Upstream vs Downstream proxy corridors)",
+    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
+    vAxis: {title: "TSS proxy (relative)"},
+    lineWidth: 2,
+    pointSize: 3,
+    series: {
+      0: {color: "#2962FF"},
+      1: {color: "#D50000"}
+    }
+  });
+print(tssChart);
+
+var tssDiffChart = ui.Chart.feature.byFeature(monthlyStats, "date", ["down_minus_up_tss"])
+  .setChartType("ColumnChart")
+  .setOptions({
+    title: "Monthly TSS Proxy Difference (Downstream - Upstream)",
+    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
+    vAxis: {title: "Difference (relative)"},
+    colors: ["#B71C1C"]
+  });
+print(tssDiffChart);
+
+var ndtiChart = ui.Chart.feature.byFeature(monthlyStats, "date", ["up_ndti_w", "down_ndti_w"])
+  .setChartType("LineChart")
+  .setOptions({
+    title: "Monthly Water NDTI (Discoloration Proxy)",
+    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
+    vAxis: {title: "NDTI"},
+    lineWidth: 2,
+    pointSize: 3,
+    series: {
+      0: {color: "#1565C0"},
+      1: {color: "#C62828"}
+    }
+  });
+print(ndtiChart);
+
+var rainChart = ui.Chart.feature.byFeature(monthlyStats, "date", ["rain_mm"])
+  .setChartType("ColumnChart")
+  .setOptions({
+    title: "Monthly CHIRPS Rainfall (AOI mean, mm)",
+    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
+    vAxis: {title: "Rainfall (mm)"},
+    colors: ["#26A69A"]
+  });
+print(rainChart);
+
+var qaChart = ui.Chart.feature.byFeature(monthlyStats, "date", ["img_count", "up_obs_px", "down_obs_px"])
+  .setChartType("LineChart")
+  .setOptions({
+    title: "QA: Monthly image count and water pixels used",
+    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
+    vAxis: {title: "Count"},
+    lineWidth: 2,
+    pointSize: 2,
+    series: {
+      0: {color: "#424242"},
+      1: {color: "#1E88E5"},
+      2: {color: "#E53935"}
+    }
+  });
+print(qaChart);
 
 // ================= OPTIONAL EXPORTS (UNCOMMENT IF NEEDED) =================
 // Export.image.toDrive({
