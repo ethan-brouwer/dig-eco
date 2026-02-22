@@ -201,11 +201,11 @@ var upstreamWaterNow = stableWaterMask.and(upstreamCorridor).selfMask();
 
 // ================= SCREENING SCORES (RED = HIGHER CONCERN) =================
 function norm(img, min, max) {
-  return img.unitScale(min, max).clamp(0, 1);
+  return img.unitScale(min, max).clamp(0, 1).rename(img.bandNames());
 }
 
 function invertNorm(img, min, max) {
-  return ee.Image(1).subtract(norm(img, min, max));
+  return ee.Image(1).subtract(norm(img, min, max)).rename(img.bandNames());
 }
 
 var landMask = stableWaterMask.not();
