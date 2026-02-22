@@ -25,6 +25,7 @@ var cloudMax = 60;
 var seasonMonths = [11, 12, 1, 2, 3, 4]; // drier season often better for turbidity visibility
 var useSeasonFilterForCurrentMaps = true;
 var enableTimeSeriesCharts = false; // set true when you want the heavier monthly analysis
+var simpleAnomalyMode = true;       // prioritize anomaly heatmap + masks; keep raw indices optional
 
 // Anomaly / significance filtering (baseline-vs-current)
 var sigmaMin = 0.02;           // floor for std dev to avoid unstable z-scores
@@ -222,6 +223,15 @@ function invertNorm(img, min, max) {
   return ee.Image(1).subtract(norm(img, min, max)).rename(img.bandNames());
 }
 
+// Use a homogeneous band schema for score stacks (required by ee.ImageCollection.fromImages).
+function scoreBand(img, min, max) {
+  return img.unitScale(min, max).clamp(0, 1).rename("score");
+}
+
+function invScoreBand(img, min, max) {
+  return ee.Image(1).subtract(scoreBand(img, min, max)).rename("score");
+}
+
 function zPos(diffImg, stdImg, outName) {
   var safeStd = stdImg.max(sigmaMin);
   return diffImg.divide(safeStd).max(0).rename(outName);
@@ -257,38 +267,83 @@ var turbidityRiseMask = tssWaterZ.gte(zSigThreshold).selfMask().rename("TSS_RISE
 var waterNDTIMask = ndtiWaterZ.gte(zSigThreshold).selfMask().rename("NDTI_W_SIG");
 
 var landAnomalyHeat = ee.ImageCollection.fromImages([
-  norm(bsiZ, 0, 4),
-  norm(ndviDropZ, 0, 4),
-  norm(ndmiDropZ, 0, 4),
-  norm(ioiZ, 0, 4),
-  norm(ferrousZ, 0, 4),
-  norm(clayZ, 0, 4)
+  scoreBand(bsiZ, 0, 4),
+  scoreBand(ndviDropZ, 0, 4),
+  scoreBand(ndmiDropZ, 0, 4),
+  scoreBand(ioiZ, 0, 4),
+  scoreBand(ferrousZ, 0, 4),
+  scoreBand(clayZ, 0, 4)
 ]).mean().updateMask(landMask).rename("LAND_ANOM_HEAT");
 
 var waterAnomalyHeat = ee.ImageCollection.fromImages([
-  norm(tssWaterZ, 0, 4),
-  norm(ndtiWaterZ, 0, 4)
+  scoreBand(tssWaterZ, 0, 4),
+  scoreBand(ndtiWaterZ, 0, 4)
 ]).mean().updateMask(waterMaskImg).rename("WATER_ANOM_HEAT");
 
 var anomalyHeat = landAnomalyHeat.unmask(0).max(waterAnomalyHeat.unmask(0))
   .rename("ANOMALY_HEAT");
 var anomalySigMask = anomalyHeat.gte(anomalyHeatThreshold).selfMask().rename("ANOMALY_SIG_MASK");
 
+// ================= UNIFIED PIXEL SCORE (LIGHTWEIGHT WEIGHTED SCREENING) =================
+// Higher risk score = higher screening concern; health score is inverse.
+// All inputs are normalized proxy scores (not direct chemistry measurements).
+var landBsiScore = scoreBand(recent.select("BSI"), 0.0, 0.45);
+var landNdviDropScore = scoreBand(ndviDropZ, 0, 4);
+var landNdmiDropScore = scoreBand(ndmiDropZ, 0, 4);
+var landIoiScore = scoreBand(ioiZ, 0, 4);
+var landFerrousScore = scoreBand(ferrousZ, 0, 4);
+var landClayScore = scoreBand(clayZ, 0, 4);
+
+var waterTssSigScore = scoreBand(tssWaterZ, 0, 4);
+var waterNdtiSigScore = scoreBand(ndtiWaterZ, 0, 4);
+
+var landRisk01 = landAnomalyHeat.multiply(0.35)
+  .add(landBsiScore.multiply(0.20))
+  .add(landNdviDropScore.multiply(0.15))
+  .add(landNdmiDropScore.multiply(0.10))
+  .add(landIoiScore.multiply(0.10))
+  .add(landFerrousScore.multiply(0.05))
+  .add(landClayScore.multiply(0.05))
+  .clamp(0, 1)
+  .updateMask(landMask)
+  .rename("LAND_RISK_01");
+
+var waterRisk01 = waterAnomalyHeat.multiply(0.45)
+  .add(waterTssSigScore.multiply(0.35))
+  .add(waterNdtiSigScore.multiply(0.20))
+  .clamp(0, 1)
+  .updateMask(waterMaskImg)
+  .rename("WATER_RISK_01");
+
+var envRiskScore = ee.Image(0)
+  .where(landMask, landRisk01.unmask(0))
+  .where(waterMaskImg, waterRisk01.unmask(0))
+  .updateMask(landMask.or(waterMaskImg))
+  .multiply(100)
+  .rename("ENV_RISK_SCORE");
+
+var envHealthScore = ee.Image(100)
+  .subtract(envRiskScore)
+  .rename("ENV_HEALTH_SCORE");
+
+var highRiskMask = envRiskScore.gte(70).selfMask().rename("HIGH_RISK_MASK");
+var poorHealthMask = envHealthScore.lte(30).selfMask().rename("POOR_HEALTH_MASK");
+
 // Land screening: exposed/disturbed surfaces + low vegetation + iron/mineral proxies
 var landStress = ee.ImageCollection.fromImages([
-  norm(recent.select("BSI"), 0.0, 0.45),
-  invertNorm(recent.select("NDVI"), 0.2, 0.8),
-  invertNorm(recent.select("NDMI"), -0.1, 0.4),
-  norm(recent.select("IOI"), 0.8, 2.0),
-  norm(recent.select("FERROUS"), 0.8, 1.8),
-  norm(recent.select("CLAY"), 0.8, 1.6)
+  scoreBand(recent.select("BSI"), 0.0, 0.45),
+  invScoreBand(recent.select("NDVI"), 0.2, 0.8),
+  invScoreBand(recent.select("NDMI"), -0.1, 0.4),
+  scoreBand(recent.select("IOI"), 0.8, 2.0),
+  scoreBand(recent.select("FERROUS"), 0.8, 1.8),
+  scoreBand(recent.select("CLAY"), 0.8, 1.6)
 ]).mean().updateMask(landMask).rename("LAND_STRESS");
 
 // Water screening: recent turbidity + change from baseline + NDTI water discoloration
 var waterStress = ee.ImageCollection.fromImages([
-  norm(recentTurbidity, 20, 250),
-  norm(turbidityAnomaly, 0, 80),   // only positive anomalies emphasized
-  norm(recentNDTIWater, 0.0, 0.3)
+  scoreBand(recentTurbidity, 20, 250),
+  scoreBand(turbidityAnomaly, 0, 80),   // only positive anomalies emphasized
+  scoreBand(recentNDTIWater, 0.0, 0.3)
 ]).mean().updateMask(waterMaskImg).rename("WATER_STRESS");
 
 var combinedScreen = landStress.unmask(0)
@@ -312,20 +367,22 @@ var visStress = {min: 0, max: 1, palette: ["ffffcc", "fd8d3c", "bd0026"]};      
 var visObsCount = {min: 0, max: 30, palette: ["2b2b2b", "f7f7f7", "00ff00"]};
 var visZ = {min: 0, max: 4, palette: ["f7f7f7", "fdae61", "d73027", "7f0000"]};
 var visAnomHeat = {min: 0, max: 1, palette: ["fff7ec", "fdd49e", "fc8d59", "d7301f", "7f0000"]};
+var visRiskScore = {min: 0, max: 100, palette: ["1a9850", "fee08b", "d73027", "7f0000"]};
+var visHealthScore = {min: 0, max: 100, palette: ["7f0000", "fdae61", "a6d96a", "1a9850"]};
 
 // ================= MAP LAYERS =================
 Map.addLayer(recent, visTrueColor, "Recent composite (true color)", true);
 Map.addLayer(recent, visFalseColor, "Recent composite (false color NIR)", false);
 
 // Core health layers requested
-Map.addLayer(recent.select("NDVI"), visNdvi, "NDVI (vegetation health)", true);
+Map.addLayer(recent.select("NDVI"), visNdvi, "NDVI (vegetation health)", !simpleAnomalyMode);
 Map.addLayer(recent.select("SAVI"), visNdvi, "SAVI (soil-adjusted veg)", false);
-Map.addLayer(recent.select("BSI"), visBsi, "BSI (bare/disturbed soil, red=high)", true);
+Map.addLayer(recent.select("BSI"), visBsi, "BSI (bare/disturbed soil, red=high)", !simpleAnomalyMode);
 
 // Additional mine-impact proxies (literature-style multispectral screening)
 Map.addLayer(recent.select("NDMI"), visNdmi, "NDMI (moisture stress)", false);
 Map.addLayer(recent.select("NDTI"), visNDTI, "NDTI (sediment/discoloration proxy)", false);
-Map.addLayer(recent.select("IOI"), visRatio, "Iron Oxide Index proxy (red=high)", true);
+Map.addLayer(recent.select("IOI"), visRatio, "Iron Oxide Index proxy (red=high)", !simpleAnomalyMode);
 Map.addLayer(recent.select("FERROUS"), {min: 0.7, max: 1.8, palette: ["ffffff", "fdae61", "d73027"]}, "Ferrous proxy ratio (red=high)", false);
 Map.addLayer(recent.select("CLAY"), {min: 0.8, max: 1.6, palette: ["f7fcf0", "addd8e", "006837"]}, "Clay/alteration proxy", false);
 
@@ -337,10 +394,14 @@ Map.addLayer(ndviDropZ, visZ, "NDVI-drop significance (z+)", false);
 Map.addLayer(ioiZ, visZ, "IOI anomaly significance (z+)", false);
 Map.addLayer(ndtiWaterZ, visZ, "Water NDTI anomaly significance (z+)", false);
 Map.addLayer(tssWaterZ, visZ, "Turbidity anomaly significance (z+)", true);
-Map.addLayer(landAnomalyHeat, visAnomHeat, "Land anomaly heatmap", true);
-Map.addLayer(waterAnomalyHeat, visAnomHeat, "Water anomaly heatmap", true);
+Map.addLayer(landAnomalyHeat, visAnomHeat, "Land anomaly heatmap", simpleAnomalyMode);
+Map.addLayer(waterAnomalyHeat, visAnomHeat, "Water anomaly heatmap", simpleAnomalyMode);
 Map.addLayer(anomalyHeat, visAnomHeat, "Combined anomaly heatmap", true);
 Map.addLayer(anomalySigMask, {palette: ["FF0000"]}, "Significant anomaly mask (filtered)", true);
+Map.addLayer(envRiskScore, visRiskScore, "Unified environmental risk score (0-100)", true);
+Map.addLayer(envHealthScore, visHealthScore, "Unified environmental health score (0-100)", false);
+Map.addLayer(highRiskMask, {palette: ["FF0000"]}, "Mask: high risk score (>=70)", true);
+Map.addLayer(poorHealthMask, {palette: ["B71C1C"]}, "Mask: poor health score (<=30)", false);
 Map.addLayer(ndviDropMask, {palette: ["FF6F00"]}, "Mask: significant NDVI drop", false);
 Map.addLayer(bsiRiseMask, {palette: ["FF0000"]}, "Mask: significant BSI rise", false);
 Map.addLayer(ioiRiseMask, {palette: ["C2185B"]}, "Mask: significant IOI rise", false);
@@ -350,8 +411,8 @@ Map.addLayer(stableWaterMask.selfMask(), {palette: ["00BFFF"]}, "Stable water ma
 Map.addLayer(riverCorridor, {palette: ["80DEEA"]}, "River corridor (proxy buffer)", false);
 Map.addLayer(upstreamCorridor, {palette: ["1E88E5"]}, "Upstream proxy corridor", false);
 Map.addLayer(downstreamCorridor, {palette: ["E53935"]}, "Downstream proxy corridor", false);
-Map.addLayer(recentTurbidity, visTurbidity, "Turbidity/TSS proxy (water)", true);
-Map.addLayer(turbidityAnomaly, visTurbidityAnom, "Turbidity anomaly vs baseline (red=increased)", true);
+Map.addLayer(recentTurbidity, visTurbidity, "Turbidity/TSS proxy (water)", !simpleAnomalyMode);
+Map.addLayer(turbidityAnomaly, visTurbidityAnom, "Turbidity anomaly vs baseline (red=increased)", !simpleAnomalyMode);
 Map.addLayer(recentNDTIWater, {min: -0.1, max: 0.3, palette: ["2166ac", "f7f7f7", "d73027"]}, "Water NDTI (discoloration)", false);
 Map.addLayer(turbidityRiseMask, {palette: ["FF1744"]}, "Mask: significant turbidity rise", true);
 Map.addLayer(waterNDTIMask, {palette: ["D50000"]}, "Mask: significant water NDTI rise", false);
@@ -359,10 +420,10 @@ Map.addLayer(upstreamWaterNow, {palette: ["2962FF"]}, "Upstream water (current)"
 Map.addLayer(downstreamWaterNow, {palette: ["FF1744"]}, "Downstream water (current)", false);
 
 // Screening layers (red-forward for quick issue scan)
-Map.addLayer(landStress, visStress, "Land mine-impact screening (red=high)", true);
-Map.addLayer(waterStress, visStress, "Water contamination screening (red=high)", true);
-Map.addLayer(combinedScreen, visStress, "Combined environmental screening (red=high)", true);
-Map.addLayer(hotSpots, {palette: ["FF0000"]}, "Hotspots > 0.65", true);
+Map.addLayer(landStress, visStress, "Land mine-impact screening (red=high)", false);
+Map.addLayer(waterStress, visStress, "Water contamination screening (red=high)", false);
+Map.addLayer(combinedScreen, visStress, "Combined environmental screening (red=high)", !simpleAnomalyMode);
+Map.addLayer(hotSpots, {palette: ["FF0000"]}, "Hotspots > 0.65", false);
 Map.addLayer(recentObsCount, visObsCount, "QA: recent observation count", false);
 Map.addLayer(baselineObsCount, visObsCount, "QA: baseline observation count", false);
 
@@ -396,6 +457,8 @@ panel.add(ui.Label("[x] Baseline-vs-current turbidity anomaly"));
 panel.add(ui.Label("[x] Red hotspot screening layers"));
 panel.add(ui.Label("[x] Baseline-vs-current anomaly heatmap (filtered)"));
 panel.add(ui.Label("[x] Significant anomaly masks (z-threshold)"));
+panel.add(ui.Label("[x] Unified per-pixel risk score (0-100)"));
+panel.add(ui.Label("[x] Unified per-pixel health score (0-100, inverse)"));
 panel.add(ui.Label("[x] Upstream/downstream proxy river corridor split"));
 panel.add(ui.Label("[x] Monthly upstream vs downstream time-series charts"));
 panel.add(ui.Label("[x] QA observation-count layers"));
@@ -408,6 +471,10 @@ panel.add(ui.Label({
   value: "Anomaly filter uses baseline-vs-current significance (z >= " + zSigThreshold + "), combined heat threshold = " + anomalyHeatThreshold + ".",
   style: {fontSize: "11px"}
 }));
+panel.add(ui.Label({
+  value: "Unified score is a weighted optical proxy screen (land/water formulas), not a calibrated contamination concentration.",
+  style: {fontSize: "11px"}
+}));
 
 Map.add(panel);
 
@@ -417,6 +484,20 @@ print("Anomaly thresholds", ee.Dictionary({
   zSigThreshold: zSigThreshold,
   anomalyHeatThreshold: anomalyHeatThreshold,
   sigmaMin: sigmaMin
+}));
+print("Unified score weights (land)", ee.Dictionary({
+  landAnomalyHeat: 0.35,
+  bsi: 0.20,
+  ndviDropSig: 0.15,
+  ndmiDropSig: 0.10,
+  ioiSig: 0.10,
+  ferrousSig: 0.05,
+  claySig: 0.05
+}));
+print("Unified score weights (water)", ee.Dictionary({
+  waterAnomalyHeat: 0.45,
+  turbiditySig: 0.35,
+  ndtiWaterSig: 0.20
 }));
 
 // ================= MONTHLY UPSTREAM/DOWNSTREAM TIME SERIES =================
