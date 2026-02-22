@@ -26,6 +26,7 @@ var seasonMonths = [11, 12, 1, 2, 3, 4]; // drier season often better for turbid
 var useSeasonFilterForCurrentMaps = true;
 var enableTimeSeriesCharts = false; // set true when you want the heavier monthly analysis
 var simpleAnomalyMode = true;       // prioritize anomaly heatmap + masks; keep raw indices optional
+var masterLayersOnly = true;        // show only unified risk/health layers by default
 
 // Anomaly / significance filtering (baseline-vs-current)
 var sigmaMin = 0.02;           // floor for std dev to avoid unstable z-scores
@@ -50,9 +51,9 @@ var aoi = minePoint.buffer(aoiRadiusMeters);
 var innerFocus = minePoint.buffer(innerFocusMeters);
 
 Map.centerObject(minePoint, 12);
-Map.addLayer(aoi, {color: "FFFFFF"}, "AOI (3 km)", true);
+Map.addLayer(aoi, {color: "FFFFFF"}, "AOI (3 km)", !masterLayersOnly);
 Map.addLayer(innerFocus, {color: "FFAA00"}, "Inner focus (1 km)", false);
-Map.addLayer(minePoint, {color: "FF0000"}, mineName, true);
+Map.addLayer(minePoint, {color: "FF0000"}, mineName, !masterLayersOnly);
 
 // ================= DATE WINDOWS =================
 var now = ee.Date(Date.now());
@@ -371,7 +372,7 @@ var visRiskScore = {min: 0, max: 100, palette: ["1a9850", "fee08b", "d73027", "7
 var visHealthScore = {min: 0, max: 100, palette: ["7f0000", "fdae61", "a6d96a", "1a9850"]};
 
 // ================= MAP LAYERS =================
-Map.addLayer(recent, visTrueColor, "Recent composite (true color)", true);
+Map.addLayer(recent, visTrueColor, "Recent composite (true color)", !masterLayersOnly);
 Map.addLayer(recent, visFalseColor, "Recent composite (false color NIR)", false);
 
 // Core health layers requested
@@ -393,14 +394,14 @@ Map.addLayer(bsiZ, visZ, "BSI anomaly significance (z+)", false);
 Map.addLayer(ndviDropZ, visZ, "NDVI-drop significance (z+)", false);
 Map.addLayer(ioiZ, visZ, "IOI anomaly significance (z+)", false);
 Map.addLayer(ndtiWaterZ, visZ, "Water NDTI anomaly significance (z+)", false);
-Map.addLayer(tssWaterZ, visZ, "Turbidity anomaly significance (z+)", true);
-Map.addLayer(landAnomalyHeat, visAnomHeat, "Land anomaly heatmap", simpleAnomalyMode);
-Map.addLayer(waterAnomalyHeat, visAnomHeat, "Water anomaly heatmap", simpleAnomalyMode);
-Map.addLayer(anomalyHeat, visAnomHeat, "Combined anomaly heatmap", true);
-Map.addLayer(anomalySigMask, {palette: ["FF0000"]}, "Significant anomaly mask (filtered)", true);
+Map.addLayer(tssWaterZ, visZ, "Turbidity anomaly significance (z+)", !masterLayersOnly && true);
+Map.addLayer(landAnomalyHeat, visAnomHeat, "Land anomaly heatmap", !masterLayersOnly && simpleAnomalyMode);
+Map.addLayer(waterAnomalyHeat, visAnomHeat, "Water anomaly heatmap", !masterLayersOnly && simpleAnomalyMode);
+Map.addLayer(anomalyHeat, visAnomHeat, "Combined anomaly heatmap", !masterLayersOnly);
+Map.addLayer(anomalySigMask, {palette: ["FF0000"]}, "Significant anomaly mask (filtered)", !masterLayersOnly);
 Map.addLayer(envRiskScore, visRiskScore, "Unified environmental risk score (0-100)", true);
-Map.addLayer(envHealthScore, visHealthScore, "Unified environmental health score (0-100)", false);
-Map.addLayer(highRiskMask, {palette: ["FF0000"]}, "Mask: high risk score (>=70)", true);
+Map.addLayer(envHealthScore, visHealthScore, "Unified environmental health score (0-100)", masterLayersOnly);
+Map.addLayer(highRiskMask, {palette: ["FF0000"]}, "Mask: high risk score (>=70)", !masterLayersOnly);
 Map.addLayer(poorHealthMask, {palette: ["B71C1C"]}, "Mask: poor health score (<=30)", false);
 Map.addLayer(ndviDropMask, {palette: ["FF6F00"]}, "Mask: significant NDVI drop", false);
 Map.addLayer(bsiRiseMask, {palette: ["FF0000"]}, "Mask: significant BSI rise", false);
@@ -414,7 +415,7 @@ Map.addLayer(downstreamCorridor, {palette: ["E53935"]}, "Downstream proxy corrid
 Map.addLayer(recentTurbidity, visTurbidity, "Turbidity/TSS proxy (water)", !simpleAnomalyMode);
 Map.addLayer(turbidityAnomaly, visTurbidityAnom, "Turbidity anomaly vs baseline (red=increased)", !simpleAnomalyMode);
 Map.addLayer(recentNDTIWater, {min: -0.1, max: 0.3, palette: ["2166ac", "f7f7f7", "d73027"]}, "Water NDTI (discoloration)", false);
-Map.addLayer(turbidityRiseMask, {palette: ["FF1744"]}, "Mask: significant turbidity rise", true);
+Map.addLayer(turbidityRiseMask, {palette: ["FF1744"]}, "Mask: significant turbidity rise", !masterLayersOnly);
 Map.addLayer(waterNDTIMask, {palette: ["D50000"]}, "Mask: significant water NDTI rise", false);
 Map.addLayer(upstreamWaterNow, {palette: ["2962FF"]}, "Upstream water (current)", false);
 Map.addLayer(downstreamWaterNow, {palette: ["FF1744"]}, "Downstream water (current)", false);
