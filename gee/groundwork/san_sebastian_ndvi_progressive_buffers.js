@@ -31,6 +31,8 @@ var useSeasonFilter = true;
 // Analysis settings
 var scaleMeters = 10;   // Sentinel-2 native for NDVI
 var minObsCount = 3;    // stronger default QA: require at least 3 observations
+var lowNdviThreshold = 0.2; // for "low vegetation" fraction by zone
+var excludeBuiltUpAndWater = true; // recommended for mine-impact NDVI interpretation
 
 // Metadata fields (kept simple so all future index scripts can match this structure)
 var dataSource = "COPERNICUS/S2_SR_HARMONIZED";
@@ -113,6 +115,20 @@ var obsCount = s2Col.select("NDVI").count().clip(aoi).rename("OBS_COUNT");
 // Mask NDVI where there are too few observations
 var ndvi = ndviComposite.updateMask(obsCount.gte(minObsCount));
 
+// Optional analysis mask: remove built-up and water pixels so NDVI trend is less
+// dominated by urban or permanent-water expansion around the mine.
+var analysisMask = ee.Image(1).clip(aoi);
+if (excludeBuiltUpAndWater) {
+  var worldCover = ee.Image("ESA/WorldCover/v200/2021").clip(aoi);
+  var builtUpMask = worldCover.eq(50); // built-up class
+  var worldWaterMask = worldCover.eq(80); // permanent water class
+  var jrcWaterMask = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select("occurrence").gte(50).clip(aoi);
+  analysisMask = builtUpMask.not().and(worldWaterMask.not()).and(jrcWaterMask.not());
+}
+
+var ndviForStats = ndvi.updateMask(analysisMask);
+var lowNdviMask = ndviForStats.lt(lowNdviThreshold).rename("LOW_NDVI");
+
 // ================= BUFFER / RING GEOMETRIES =================
 var distancesList = ee.List(bufferDistancesMeters).sort();
 
@@ -164,7 +180,7 @@ function summarizeNdviByZones(zones, zoneName) {
     .combine({reducer2: ee.Reducer.percentile([25, 75]), sharedInputs: true})
     .combine({reducer2: ee.Reducer.count(), sharedInputs: true});
 
-  var stats = ndvi.reduceRegions({
+  var stats = ndviForStats.reduceRegions({
     collection: zones,
     reducer: reducer,
     scale: scaleMeters
@@ -177,6 +193,13 @@ function summarizeNdviByZones(zones, zoneName) {
       validCount.divide(expectedPixels),
       null
     );
+    var lowNdviFraction = lowNdviMask.reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: f.geometry(),
+      scale: scaleMeters,
+      bestEffort: true,
+      maxPixels: 1e9
+    }).get("LOW_NDVI");
 
     return f.set({
       site_name: siteName,
@@ -190,7 +213,10 @@ function summarizeNdviByZones(zones, zoneName) {
       cloud_max: cloudMax,
       scale_m: scaleMeters,
       min_obs_count: minObsCount,
-      valid_pixel_fraction: validPixelFraction
+      valid_pixel_fraction: validPixelFraction,
+      exclude_built_up_and_water: excludeBuiltUpAndWater,
+      low_ndvi_threshold: lowNdviThreshold,
+      low_ndvi_fraction: lowNdviFraction
     });
   });
 
@@ -214,7 +240,9 @@ var visObs = {
 };
 
 Map.addLayer(ndvi, visNdvi, "NDVI composite (recent)", true);
+Map.addLayer(ndviForStats, visNdvi, "NDVI used for stats (optional land mask)", false);
 Map.addLayer(obsCount, visObs, "QA: observation count", false);
+Map.addLayer(analysisMask.selfMask(), {palette: ["C8E6C9"]}, "Analysis mask (built-up/water removed)", false);
 
 // ================= CHARTS =================
 var cumulativeMeanChart = ui.Chart.feature.byFeature(cumulativeStats, "outer_m", ["mean"])
