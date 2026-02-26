@@ -174,18 +174,24 @@ Map.addLayer(ringFeatures.style({
 
 // ================= ZONAL NDVI SUMMARY =================
 function summarizeNdviByZones(zones, zoneName) {
-  var reducer = ee.Reducer.mean()
-    .combine({reducer2: ee.Reducer.median(), sharedInputs: true})
-    .combine({reducer2: ee.Reducer.stdDev(), sharedInputs: true})
-    .combine({reducer2: ee.Reducer.percentile([25, 75]), sharedInputs: true})
-    .combine({reducer2: ee.Reducer.count(), sharedInputs: true});
+  var stats = zones.map(function(f) {
+    var meanVal = ndviForStats.reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: f.geometry(),
+      scale: scaleMeters,
+      bestEffort: true,
+      maxPixels: 1e9
+    }).get("NDVI");
 
-  var stats = ndviForStats.reduceRegions({
-    collection: zones,
-    reducer: reducer,
-    scale: scaleMeters
-  }).map(function(f) {
-    var validCount = ee.Number(f.get("count"));
+    var countVal = ndviForStats.reduceRegion({
+      reducer: ee.Reducer.count(),
+      geometry: f.geometry(),
+      scale: scaleMeters,
+      bestEffort: true,
+      maxPixels: 1e9
+    }).get("NDVI");
+
+    var validCount = ee.Number(countVal);
     var zoneAreaM2 = ee.Number(f.geometry().area(1));
     var expectedPixels = zoneAreaM2.divide(scaleMeters * scaleMeters);
     var validPixelFraction = ee.Algorithms.If(
@@ -202,6 +208,8 @@ function summarizeNdviByZones(zones, zoneName) {
     }).get("LOW_NDVI");
 
     return f.set({
+      mean: meanVal,
+      count: countVal,
       site_name: siteName,
       metric: metricName,
       data_source: dataSource,
