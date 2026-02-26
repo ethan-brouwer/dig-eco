@@ -305,7 +305,8 @@ var visObs = {
 Map.addLayer(ndvi, visNdvi, "NDVI composite (recent)", true);
 Map.addLayer(ndviForStats, visNdvi, "NDVI used for stats (optional land mask)", false);
 Map.addLayer(obsCount, visObs, "QA: observation count", false);
-Map.addLayer(analysisMask.selfMask(), {palette: ["C8E6C9"]}, "Analysis mask (built-up/water removed)", false);
+Map.addLayer(builtUpMask.selfMask(), {palette: ["616161"]}, "Built-up mask (WorldCover class 50)", true);
+Map.addLayer(analysisMask.selfMask(), {palette: ["C8E6C9"]}, "Analysis mask (when enabled)", false);
 
 // ================= CHARTS =================
 var cumulativeStatsForChart = cumulativeStats.filter(ee.Filter.notNull(["mean"]));
@@ -335,6 +336,23 @@ var ringMeanChart = ui.Chart.feature.byFeature(ringStatsForChart, "outer_m", ["m
     colors: ["#66BB6A"]
   });
 print(ringMeanChart);
+
+var ringNdviBuiltUpChart = ui.Chart.feature.byFeature(
+  ringStatsForChart,
+  "label",
+  ["mean", "built_up_fraction"]
+).setChartType("ColumnChart")
+  .setOptions({
+    title: "Ring Comparison: NDVI Mean and Built-up Fraction",
+    hAxis: {title: "Ring"},
+    vAxis: {title: "Value (0-1)", viewWindow: {min: 0, max: 1}},
+    series: {
+      0: {color: "#2E7D32"},
+      1: {color: "#616161"}
+    },
+    isStacked: false
+  });
+print(ringNdviBuiltUpChart);
 
 // ================= OPTIONAL EXPORTS (UNCOMMENT IF NEEDED) =================
 // Export.table.toDrive({
