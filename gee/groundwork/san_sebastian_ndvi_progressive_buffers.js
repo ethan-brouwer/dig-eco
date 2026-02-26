@@ -121,7 +121,11 @@ var worldCover = ee.Image("ESA/WorldCover/v200/2021").clip(aoi);
 var builtUpMask = worldCover.eq(50).rename("BUILT_UP"); // class 50
 var worldWaterMask = worldCover.eq(80).rename("WORLD_WATER"); // class 80
 var jrcWaterMask = ee.Image("JRC/GSW1_4/GlobalSurfaceWater")
-  .select("occurrence").gte(50).clip(aoi).rename("JRC_WATER");
+  .select("occurrence")
+  .unmask(0) // treat missing pixels as non-water for stable masking
+  .gte(50)
+  .clip(aoi)
+  .rename("JRC_WATER");
 
 var analysisMask = ee.Image(1).rename("ANALYSIS_MASK").clip(aoi);
 if (excludeBuiltUpAndWater) {
