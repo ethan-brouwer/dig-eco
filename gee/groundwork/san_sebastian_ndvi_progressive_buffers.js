@@ -117,13 +117,13 @@ var ndvi = ndviComposite.updateMask(obsCount.gte(minObsCount));
 
 // Optional analysis mask: remove built-up and water pixels so NDVI trend is less
 // dominated by urban or permanent-water expansion around the mine.
-var analysisMask = ee.Image(1).clip(aoi);
+var analysisMask = ee.Image(1).rename("ANALYSIS_MASK").clip(aoi);
 if (excludeBuiltUpAndWater) {
   var worldCover = ee.Image("ESA/WorldCover/v200/2021").clip(aoi);
   var builtUpMask = worldCover.eq(50); // built-up class
   var worldWaterMask = worldCover.eq(80); // permanent water class
   var jrcWaterMask = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select("occurrence").gte(50).clip(aoi);
-  analysisMask = builtUpMask.not().and(worldWaterMask.not()).and(jrcWaterMask.not());
+  analysisMask = builtUpMask.not().and(worldWaterMask.not()).and(jrcWaterMask.not()).rename("ANALYSIS_MASK");
 }
 
 var ndviForStats = ndvi.updateMask(analysisMask);
@@ -189,7 +189,7 @@ function summarizeNdviByZones(zones, zoneName) {
       scale: scaleMeters,
       bestEffort: true,
       maxPixels: 1e9
-    }).get("constant");
+    }).get("ANALYSIS_MASK");
 
     var meanVal = ndviForStats.reduceRegion({
       reducer: ee.Reducer.mean(),
