@@ -175,6 +175,22 @@ Map.addLayer(ringFeatures.style({
 // ================= ZONAL NDVI SUMMARY =================
 function summarizeNdviByZones(zones, zoneName) {
   var stats = zones.map(function(f) {
+    var obsQualifiedCount = ndvi.reduceRegion({
+      reducer: ee.Reducer.count(),
+      geometry: f.geometry(),
+      scale: scaleMeters,
+      bestEffort: true,
+      maxPixels: 1e9
+    }).get("NDVI");
+
+    var analysisMaskCount = analysisMask.reduceRegion({
+      reducer: ee.Reducer.sum(),
+      geometry: f.geometry(),
+      scale: scaleMeters,
+      bestEffort: true,
+      maxPixels: 1e9
+    }).get("constant");
+
     var meanVal = ndviForStats.reduceRegion({
       reducer: ee.Reducer.mean(),
       geometry: f.geometry(),
@@ -191,7 +207,9 @@ function summarizeNdviByZones(zones, zoneName) {
       maxPixels: 1e9
     }).get("NDVI");
 
-    var validCount = ee.Number(countVal);
+    var validCount = ee.Number(ee.Algorithms.If(ee.Algorithms.IsEqual(countVal, null), 0, countVal));
+    var obsQualified = ee.Number(ee.Algorithms.If(ee.Algorithms.IsEqual(obsQualifiedCount, null), 0, obsQualifiedCount));
+    var analysisAvailable = ee.Number(ee.Algorithms.If(ee.Algorithms.IsEqual(analysisMaskCount, null), 0, analysisMaskCount));
     var zoneAreaM2 = ee.Number(f.geometry().area(1));
     var expectedPixels = zoneAreaM2.divide(scaleMeters * scaleMeters);
     var validPixelFraction = ee.Algorithms.If(
@@ -199,6 +217,25 @@ function summarizeNdviByZones(zones, zoneName) {
       validCount.divide(expectedPixels),
       null
     );
+
+    var nullReason = ee.Algorithms.If(
+      validCount.gt(0),
+      "",
+      ee.Algorithms.If(
+        obsQualified.eq(0),
+        "No pixels after minObsCount/time/cloud filtering",
+        ee.Algorithms.If(
+          ee.Algorithms.IsEqual(excludeBuiltUpAndWater, true),
+          ee.Algorithms.If(
+            analysisAvailable.eq(0),
+            "All pixels removed by built-up/water analysis mask",
+            "No pixels after combined masking"
+          ),
+          "No pixels after combined masking"
+        )
+      )
+    );
+
     var lowNdviFraction = lowNdviMask.reduceRegion({
       reducer: ee.Reducer.mean(),
       geometry: f.geometry(),
@@ -221,14 +258,18 @@ function summarizeNdviByZones(zones, zoneName) {
       cloud_max: cloudMax,
       scale_m: scaleMeters,
       min_obs_count: minObsCount,
+      obs_qualified_count: obsQualifiedCount,
+      analysis_mask_count: analysisMaskCount,
       valid_pixel_fraction: validPixelFraction,
       exclude_built_up_and_water: excludeBuiltUpAndWater,
       low_ndvi_threshold: lowNdviThreshold,
-      low_ndvi_fraction: lowNdviFraction
+      low_ndvi_fraction: lowNdviFraction,
+      null_reason: nullReason
     });
   });
 
   print(zoneName + " NDVI zonal stats", stats);
+  print(zoneName + " zones with null mean", stats.filter(ee.Filter.eq("mean", null)));
   return stats;
 }
 
@@ -253,7 +294,13 @@ Map.addLayer(obsCount, visObs, "QA: observation count", false);
 Map.addLayer(analysisMask.selfMask(), {palette: ["C8E6C9"]}, "Analysis mask (built-up/water removed)", false);
 
 // ================= CHARTS =================
-var cumulativeMeanChart = ui.Chart.feature.byFeature(cumulativeStats, "outer_m", ["mean"])
+var cumulativeStatsForChart = cumulativeStats.filter(ee.Filter.notNull(["mean"]));
+var ringStatsForChart = ringStats.filter(ee.Filter.notNull(["mean"]));
+
+print("Cumulative zones used in chart", cumulativeStatsForChart.size());
+print("Ring zones used in chart", ringStatsForChart.size());
+
+var cumulativeMeanChart = ui.Chart.feature.byFeature(cumulativeStatsForChart, "outer_m", ["mean"])
   .setChartType("LineChart")
   .setOptions({
     title: "NDVI Mean by Cumulative Buffer Distance",
@@ -265,7 +312,7 @@ var cumulativeMeanChart = ui.Chart.feature.byFeature(cumulativeStats, "outer_m",
   });
 print(cumulativeMeanChart);
 
-var ringMeanChart = ui.Chart.feature.byFeature(ringStats, "outer_m", ["mean"])
+var ringMeanChart = ui.Chart.feature.byFeature(ringStatsForChart, "outer_m", ["mean"])
   .setChartType("ColumnChart")
   .setOptions({
     title: "NDVI Mean by Ring",
