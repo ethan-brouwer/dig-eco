@@ -16,7 +16,7 @@ var siteLat = 13.6509;
 
 // Progressive distances from site center (meters).
 // Script computes BOTH cumulative buffers (0-distance) and ring annuli.
-var bufferDistancesMeters = [250, 500, 1000, 2000, 3000];
+var bufferDistancesMeters = [100, 250, 500, 1000, 2000, 3000];
 
 // Temporal / QA settings
 // Use explicit dates for reproducibility across runs/sites.
@@ -32,7 +32,7 @@ var useSeasonFilter = true;
 var scaleMeters = 10;   // Sentinel-2 native for NDVI
 var minObsCount = 3;    // stronger default QA: require at least 3 observations
 var lowNdviThreshold = 0.2; // for "low vegetation" fraction by zone
-var excludeBuiltUpAndWater = true; // recommended for mine-impact NDVI interpretation
+var excludeBuiltUpAndWater = false; // keep NDVI simple; use built-up fraction for interpretation
 
 // Metadata fields (kept simple so all future index scripts can match this structure)
 var dataSource = "COPERNICUS/S2_SR_HARMONIZED";
@@ -117,13 +117,18 @@ var ndvi = ndviComposite.updateMask(obsCount.gte(minObsCount));
 
 // Optional analysis mask: remove built-up and water pixels so NDVI trend is less
 // dominated by urban or permanent-water expansion around the mine.
+var worldCover = ee.Image("ESA/WorldCover/v200/2021").clip(aoi);
+var builtUpMask = worldCover.eq(50).rename("BUILT_UP"); // class 50
+var worldWaterMask = worldCover.eq(80).rename("WORLD_WATER"); // class 80
+var jrcWaterMask = ee.Image("JRC/GSW1_4/GlobalSurfaceWater")
+  .select("occurrence").gte(50).clip(aoi).rename("JRC_WATER");
+
 var analysisMask = ee.Image(1).rename("ANALYSIS_MASK").clip(aoi);
 if (excludeBuiltUpAndWater) {
-  var worldCover = ee.Image("ESA/WorldCover/v200/2021").clip(aoi);
-  var builtUpMask = worldCover.eq(50); // built-up class
-  var worldWaterMask = worldCover.eq(80); // permanent water class
-  var jrcWaterMask = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select("occurrence").gte(50).clip(aoi);
-  analysisMask = builtUpMask.not().and(worldWaterMask.not()).and(jrcWaterMask.not()).rename("ANALYSIS_MASK");
+  analysisMask = builtUpMask.not()
+    .and(worldWaterMask.not())
+    .and(jrcWaterMask.not())
+    .rename("ANALYSIS_MASK");
 }
 
 var ndviForStats = ndvi.updateMask(analysisMask);
@@ -244,6 +249,14 @@ function summarizeNdviByZones(zones, zoneName) {
       maxPixels: 1e9
     }).get("LOW_NDVI");
 
+    var builtUpFraction = builtUpMask.reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: f.geometry(),
+      scale: scaleMeters,
+      bestEffort: true,
+      maxPixels: 1e9
+    }).get("BUILT_UP");
+
     return f.set({
       mean: meanVal,
       count: countVal,
@@ -262,6 +275,7 @@ function summarizeNdviByZones(zones, zoneName) {
       analysis_mask_count: analysisMaskCount,
       valid_pixel_fraction: validPixelFraction,
       exclude_built_up_and_water: excludeBuiltUpAndWater,
+      built_up_fraction: builtUpFraction,
       low_ndvi_threshold: lowNdviThreshold,
       low_ndvi_fraction: lowNdviFraction,
       null_reason: nullReason
