@@ -245,7 +245,7 @@ function zoneMaskFromFeature(feature) {
   var zoneType = ee.String(feature.get("zone_type"));
   var inner = ee.Number(feature.get("inner_m"));
   var outer = ee.Number(feature.get("outer_m"));
-  var hasZone = ee.Boolean(feature.get("has_zone"));
+  var hasZone = feature.get("has_zone");
 
   var mask = ee.Image(ee.Algorithms.If(
     zoneType.compareTo("upstream").eq(0),
