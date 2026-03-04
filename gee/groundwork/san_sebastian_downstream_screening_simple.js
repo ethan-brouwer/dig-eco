@@ -30,15 +30,16 @@ var useSeasonFilter = false;
 
 // Hydro / stream settings.
 var downstreamAzimuthDeg = 110;    // first-pass guide; adjust after visual inspection
-var streamAccThreshold = 250;      // lower = more channels, higher = main stem only
-var streamBufferMeters = 60;
-var outletSnapMeters = 300;
+var streamAccThreshold = 50;       // lower = more channels, higher = main stem only
+var streamBufferMeters = 90;
+var outletSnapMeters = 1000;
 var distanceBinEdgesMeters = [0, 500, 1500, 3000];
 var upstreamControlRangeMeters = [-1500, -500];
 
 // QA / scale settings.
 var scaleMeters = 30;              // use 30 m for stable HydroSHEDS + S2 summary
 var minWaterPixelsPerZone = 5;
+var noDataValue = -9999;
 
 // ================= MAP SETUP =================
 Map.setOptions("SATELLITE");
@@ -284,6 +285,7 @@ var upstreamZone = maskToZoneFeature(upstreamZoneMask, {
 
 print("Downstream bin availability", downstreamZones.aggregate_array("has_zone"));
 print("Upstream control available", upstreamZone.get("has_zone"));
+print("Snapped stream candidates", snappedPointCount);
 
 Map.addLayer(downstreamZones.style({
   color: "FFA500",
@@ -315,7 +317,8 @@ Map.addLayer(upstreamZonePixels, {palette: ["2962FF"]}, "QA upstream control pix
 
 // ================= ZONAL SUMMARIES =================
 function summarizeZone(feature, img, maskImg) {
-  var zoneMask = ee.Image.constant(1).updateMask(maskImg).updateMask(zoneMaskFromFeature(feature));
+  var zoneOnlyMask = zoneMaskFromFeature(feature);
+  var zoneMask = ee.Image.constant(1).updateMask(maskImg).updateMask(zoneOnlyMask);
   var waterDict = zoneMask.reduceRegion({
     reducer: ee.Reducer.count(),
     geometry: aoi,
@@ -331,7 +334,10 @@ function summarizeZone(feature, img, maskImg) {
     waterPxRaw
   ));
 
-  var stats = img.select(["TSS_PROXY", "NDTI", "RED_EDGE_TURB"]).updateMask(maskImg).reduceRegion({
+  var stats = img.select(["TSS_PROXY", "NDTI", "RED_EDGE_TURB"])
+    .updateMask(maskImg)
+    .updateMask(zoneOnlyMask)
+    .reduceRegion({
     reducer: ee.Reducer.mean(),
     geometry: aoi,
     scale: scaleMeters,
@@ -343,9 +349,9 @@ function summarizeZone(feature, img, maskImg) {
 
   return feature.set({
     water_px: waterPx,
-    tss_mean: ee.Algorithms.If(enoughWater, stats.get("TSS_PROXY"), null),
-    ndti_mean: ee.Algorithms.If(enoughWater, stats.get("NDTI"), null),
-    red_edge_mean: ee.Algorithms.If(enoughWater, stats.get("RED_EDGE_TURB"), null)
+    tss_mean: ee.Algorithms.If(enoughWater, stats.get("TSS_PROXY"), noDataValue),
+    ndti_mean: ee.Algorithms.If(enoughWater, stats.get("NDTI"), noDataValue),
+    red_edge_mean: ee.Algorithms.If(enoughWater, stats.get("RED_EDGE_TURB"), noDataValue)
   });
 }
 
@@ -360,9 +366,9 @@ var upstreamStats = ee.FeatureCollection([
 var profileStats = upstreamStats.merge(downstreamStats);
 print("Downstream profile stats", profileStats);
 
-var downstreamTssChartStats = downstreamStats.filter(ee.Filter.notNull(["tss_mean"]));
-var downstreamNdtiChartStats = downstreamStats.filter(ee.Filter.notNull(["ndti_mean"]));
-var downstreamRedEdgeChartStats = downstreamStats.filter(ee.Filter.notNull(["red_edge_mean"]));
+var downstreamTssChartStats = downstreamStats.filter(ee.Filter.gt("tss_mean", noDataValue));
+var downstreamNdtiChartStats = downstreamStats.filter(ee.Filter.gt("ndti_mean", noDataValue));
+var downstreamRedEdgeChartStats = downstreamStats.filter(ee.Filter.gt("red_edge_mean", noDataValue));
 
 var tssDistanceChart = ui.Chart.feature.byFeature(downstreamTssChartStats, "label", ["tss_mean"])
   .setChartType("ColumnChart")
@@ -426,13 +432,13 @@ var monthlyStats = ee.FeatureCollection(monthlyStarts.map(function(start) {
     date: start.format("YYYY-MM"),
     img_count: count,
     rain_mm: rainMm,
-    up_tss: null,
-    down_tss_0_500: null,
-    down_tss_500_1500: null,
-    down_tss_1500_3000: null,
-    up_red_edge: null,
-    down_red_edge_0_500: null,
-    down_minus_up_tss_0_500: null
+    up_tss: noDataValue,
+    down_tss_0_500: noDataValue,
+    down_tss_500_1500: noDataValue,
+    down_tss_1500_3000: noDataValue,
+    up_red_edge: noDataValue,
+    down_red_edge_0_500: noDataValue,
+    down_minus_up_tss_0_500: noDataValue
   });
 
   return ee.Feature(ee.Algorithms.If(count.gt(0), (function() {
@@ -441,10 +447,11 @@ var monthlyStats = ee.FeatureCollection(monthlyStarts.map(function(start) {
     var upMask = w.and(upstreamCorridor).selfMask();
 
     function zoneMean(zoneFeature, corridorMask, bandName) {
+      var zoneOnlyMask = zoneMaskFromFeature(zoneFeature);
       var zoneMask = ee.Image.constant(1)
         .updateMask(w)
         .updateMask(corridorMask)
-        .updateMask(zoneMaskFromFeature(zoneFeature));
+        .updateMask(zoneOnlyMask);
       var pxDict = zoneMask.reduceRegion({
         reducer: ee.Reducer.count(),
         geometry: aoi,
@@ -459,7 +466,11 @@ var monthlyStats = ee.FeatureCollection(monthlyStarts.map(function(start) {
         pxRaw
       ));
 
-      var mean = img.select(bandName).updateMask(w).updateMask(corridorMask).reduceRegion({
+      var mean = img.select(bandName)
+        .updateMask(w)
+        .updateMask(corridorMask)
+        .updateMask(zoneOnlyMask)
+        .reduceRegion({
         reducer: ee.Reducer.mean(),
         geometry: aoi,
         scale: scaleMeters,
@@ -467,7 +478,7 @@ var monthlyStats = ee.FeatureCollection(monthlyStarts.map(function(start) {
         maxPixels: 1e9
       }).get(bandName);
 
-      return ee.Algorithms.If(px.gte(minWaterPixelsPerZone), mean, null);
+      return ee.Algorithms.If(px.gte(minWaterPixelsPerZone), mean, noDataValue);
     }
 
     var downList = downstreamZones.toList(downstreamZones.size());
@@ -488,11 +499,11 @@ var monthlyStats = ee.FeatureCollection(monthlyStarts.map(function(start) {
       up_red_edge: upRedEdge,
       down_red_edge_0_500: downRedEdge0,
       down_minus_up_tss_0_500: ee.Algorithms.If(
-        ee.Algorithms.IsEqual(upTss, null),
-        null,
+        ee.Number(upTss).lte(noDataValue),
+        noDataValue,
         ee.Algorithms.If(
-          ee.Algorithms.IsEqual(downTss0, null),
-          null,
+          ee.Number(downTss0).lte(noDataValue),
+          noDataValue,
           ee.Number(downTss0).subtract(ee.Number(upTss))
         )
       )
