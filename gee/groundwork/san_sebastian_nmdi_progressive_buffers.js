@@ -21,20 +21,20 @@ var siteLon = -87.93002;
 var siteLat = 13.6509;
 
 // Progressive distances from site center (meters).
-var bufferDistancesMeters = [100, 250, 500, 1000, 2000, 3000];
+var bufferDistancesMeters = [100, 250, 500, 1000, 1500];
 
 // Temporal / QA settings
-var startDate = "2025-01-01";
-var endDate = "2026-01-01";   // exclusive end date
+var startDate = "2025-11-01";
+var endDate = "2026-03-01";   // exclusive end date
 var cloudMax = 60;
 var seasonMonths = [11, 12, 1, 2, 3, 4];
 var useSeasonFilter = true;
 
 // Visualization / screening settings
 var scaleMeters = 20;
-var minObsCount = 3;
+var minObsCount = 2;
 var jrcWaterOccurrenceThreshold = 50;
-var streamAccThreshold = 50;
+var streamAccThreshold = 20;
 
 // ================= MAP SETUP =================
 Map.setOptions("SATELLITE");
@@ -69,7 +69,7 @@ function maskS2(img) {
 }
 
 function scaleS2(img) {
-  var optical = img.select(["B3", "B4", "B8", "B11", "B12"]).multiply(0.0001);
+  var optical = img.select(["B2", "B3", "B4", "B8", "B11", "B12"]).multiply(0.0001);
   return img.addBands(optical, null, true);
 }
 
@@ -88,12 +88,13 @@ function addIndices(img) {
   var mndwi = img.normalizedDifference(["B3", "B11"]).rename("MNDWI");
   var ndti = img.normalizedDifference(["B4", "B3"]).rename("NDTI");
   var tssProxy = red.multiply(1000).rename("TSS_PROXY");
+  var redGreen = red.divide(green).rename("RED_GREEN");
   var nmdi = img.expression(
     "(NIR - (SWIR1 - SWIR2)) / (NIR + (SWIR1 - SWIR2))",
     {NIR: nir, SWIR1: swir1, SWIR2: swir2}
   ).rename("NMDI");
 
-  return img.addBands([ndwi, mndwi, ndti, tssProxy, nmdi]);
+  return img.addBands([ndwi, mndwi, ndti, tssProxy, redGreen, nmdi]);
 }
 
 function buildS2Collection(start, end) {
@@ -118,6 +119,8 @@ print("S2 image count (filtered)", s2Col.size());
 
 var recent = s2Col.median().clip(aoi);
 var obsCount = s2Col.select("B8").count().clip(aoi).rename("OBS_COUNT");
+var recentTrueColor = recent.select(["B4", "B3", "B2"]).rename(["R", "G", "B"]);
+var recentFalseColor = recent.select(["B8", "B4", "B3"]).rename(["NIR", "R", "G"]);
 
 // ================= WATER / RIVER CONTEXT =================
 var jrcWater = ee.Image("JRC/GSW1_4/GlobalSurfaceWater")
@@ -128,30 +131,39 @@ var permanentWater = jrcWater.gte(jrcWaterOccurrenceThreshold).rename("PERMANENT
 
 function waterMask(img) {
   var opticalWater = img.select("NDWI").gt(0.12).or(img.select("MNDWI").gt(0.15));
-  return opticalWater.and(permanentWater);
+  return opticalWater;
 }
 
-var stableWater = waterMask(recent).selfMask().rename("STABLE_WATER");
+var currentWater = waterMask(recent).selfMask().rename("CURRENT_WATER");
 var hydroAcc = ee.Image("WWF/HydroSHEDS/15ACC").clip(aoi);
-var streamMask = hydroAcc.gte(streamAccThreshold).selfMask().rename("STREAM_MASK");
+var streamMask = hydroAcc.gte(streamAccThreshold)
+  .focal_max(30, "circle", "meters")
+  .selfMask()
+  .rename("STREAM_MASK");
 var riverContext = permanentWater.selfMask().or(streamMask).selfMask().rename("RIVER_CONTEXT");
+var riverWaterMask = currentWater.and(riverContext).selfMask().rename("RIVER_WATER_MASK");
 
 // Land-focused NMDI view: keep river/water separate from land moisture.
 var nmdi = recent.select("NMDI")
   .updateMask(obsCount.gte(minObsCount))
-  .updateMask(stableWater.not())
+  .updateMask(riverWaterMask.not())
   .rename("NMDI");
 
 // Water-focused river condition views.
 var ndtiWater = recent.select("NDTI")
   .updateMask(obsCount.gte(minObsCount))
-  .updateMask(stableWater)
+  .updateMask(riverWaterMask)
   .rename("NDTI_WATER");
 
 var tssWater = recent.select("TSS_PROXY")
   .updateMask(obsCount.gte(minObsCount))
-  .updateMask(stableWater)
+  .updateMask(riverWaterMask)
   .rename("TSS_WATER");
+
+var redGreenWater = recent.select("RED_GREEN")
+  .updateMask(obsCount.gte(minObsCount))
+  .updateMask(riverWaterMask)
+  .rename("RED_GREEN_WATER");
 
 // ================= BUFFER / RING GEOMETRIES =================
 var distancesList = ee.List(bufferDistancesMeters).sort();
@@ -184,56 +196,48 @@ var ringFeatures = ee.FeatureCollection(distancesList.map(function(d) {
   });
 }));
 
-// ================= SIMPLE ZONAL SUMMARY =================
-function summarizeNmdi(zones, zoneName) {
-  return zones.map(function(f) {
-    var meanNmdi = nmdi.reduceRegion({
-      reducer: ee.Reducer.mean(),
-      geometry: f.geometry(),
-      scale: scaleMeters,
-      bestEffort: true,
-      maxPixels: 1e9
-    }).get("NMDI");
+print("River water pixel count", riverWaterMask.reduceRegion({
+  reducer: ee.Reducer.count(),
+  geometry: aoi,
+  scale: scaleMeters,
+  bestEffort: true,
+  maxPixels: 1e9
+}).values().get(0));
 
-    var validPx = nmdi.reduceRegion({
-      reducer: ee.Reducer.count(),
-      geometry: f.geometry(),
-      scale: scaleMeters,
-      bestEffort: true,
-      maxPixels: 1e9
-    }).get("NMDI");
+print("River NDTI range", ndtiWater.reduceRegion({
+  reducer: ee.Reducer.percentile([5, 50, 95]),
+  geometry: aoi,
+  scale: scaleMeters,
+  bestEffort: true,
+  maxPixels: 1e9
+}));
 
-    return f.set({
-      summary_set: zoneName,
-      nmdi_mean: meanNmdi,
-      valid_px: validPx
-    });
-  });
-}
-
-var cumulativeStats = summarizeNmdi(cumulativeFeatures, "cumulative_buffer");
-var ringStats = summarizeNmdi(ringFeatures, "ring");
-
-print("Cumulative buffer NMDI summary", cumulativeStats);
-print("Ring NMDI summary", ringStats);
+print("River TSS proxy range", tssWater.reduceRegion({
+  reducer: ee.Reducer.percentile([5, 50, 95]),
+  geometry: aoi,
+  scale: scaleMeters,
+  bestEffort: true,
+  maxPixels: 1e9
+}));
 
 // ================= VISUALIZATION =================
-var visTrueColor = {bands: ["B4", "B3", "B2"], min: 0.02, max: 0.30};
-var visFalseColor = {bands: ["B8", "B4", "B3"], min: 0.03, max: 0.40};
 var visNmdi = {min: -0.6, max: 0.6, palette: ["8c510a", "f6e8c3", "c7eae5", "01665e"]};
-var visNdti = {min: -0.2, max: 0.2, palette: ["2166AC", "F7F7F7", "B2182B"]};
-var visTss = {min: 20, max: 300, palette: ["08306B", "41B6C4", "FFFFBF", "FDAE61", "D73027"]};
+var visNdti = {min: -0.08, max: 0.08, palette: ["2166AC", "F7F7F7", "B2182B"]};
+var visTss = {min: 40, max: 180, palette: ["08306B", "41B6C4", "FFFFBF", "FDAE61", "D73027"]};
+var visRedGreen = {min: 0.7, max: 1.4, palette: ["F7FBFF", "FDAE61", "D73027"]};
 var visObsCount = {min: 0, max: 20, palette: ["2b2b2b", "f7f7f7", "00ff00"]};
 
-Map.addLayer(recent, visTrueColor, "Recent composite (true color)", false);
-Map.addLayer(recent, visFalseColor, "Recent composite (false color NIR)", false);
+Map.addLayer(recentTrueColor, {bands: ["R", "G", "B"], min: 0.02, max: 0.30}, "Recent composite (true color RGB)", true);
+Map.addLayer(recentFalseColor, {bands: ["NIR", "R", "G"], min: 0.03, max: 0.40}, "Recent composite (false color NIR-R-G)", false);
 Map.addLayer(nmdi, visNmdi, "NMDI (land only; water masked)", true);
-Map.addLayer(permanentWater.selfMask(), {palette: ["4FC3F7"]}, "Permanent water (JRC)", false);
-Map.addLayer(streamMask, {palette: ["00FFFF"]}, "HydroSHEDS stream mask", false);
-Map.addLayer(riverContext, {palette: ["80DEEA"]}, "River / water context", true);
-Map.addLayer(stableWater, {palette: ["00BFFF"]}, "Current water mask", false);
-Map.addLayer(ndtiWater, visNdti, "River NDTI (water only)", true);
-Map.addLayer(tssWater, visTss, "River TSS proxy (water only)", false);
+Map.addLayer(permanentWater.selfMask(), {palette: ["4FC3F7"]}, "River context: JRC permanent water", false);
+Map.addLayer(streamMask, {palette: ["00FFFF"]}, "River context: HydroSHEDS stream mask", false);
+Map.addLayer(riverContext, {palette: ["80DEEA"]}, "River context: combined water corridor", true);
+Map.addLayer(currentWater, {palette: ["64B5F6"]}, "Current optical water mask", false);
+Map.addLayer(riverWaterMask, {palette: ["00BFFF"]}, "River analysis mask (current water in corridor)", true);
+Map.addLayer(ndtiWater, visNdti, "Sediment proxy: NDTI (water only)", true);
+Map.addLayer(tssWater, visTss, "Sediment proxy: red reflectance / TSS proxy (water only)", false);
+Map.addLayer(redGreenWater, visRedGreen, "Sediment proxy: red-green ratio (water only)", false);
 Map.addLayer(obsCount, visObsCount, "QA observation count", false);
 
 Map.addLayer(cumulativeFeatures.style({
@@ -249,4 +253,5 @@ Map.addLayer(ringFeatures.style({
 }), {}, "Progressive rings", true);
 
 print("NMDI is being used here for surrounding land moisture/stress, not for the river itself.");
-print("For river visualization, use true color, JRC/HydroSHEDS context, the current water mask, and the water-only NDTI/TSS layers.");
+print("River-condition layers are water-only screening proxies: NDTI, red reflectance/TSS proxy, and red-green ratio.");
+print("This simplified version uses a shorter date range, smaller AOI, and a looser river-water mask so the river layers render more reliably.");
