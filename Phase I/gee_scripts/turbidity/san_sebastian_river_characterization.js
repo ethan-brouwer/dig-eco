@@ -31,6 +31,8 @@ var minObsCount = 2;
 // River-mask controls.
 var jrcOccurrenceThreshold = 5;
 var jrcCorridorExpandMeters = 60;
+var hydroAccThreshold = 20;
+var hydroCorridorExpandMeters = 60;
 var ndwiThreshold = 0.05;
 var mndwiThreshold = 0.02;
 
@@ -51,6 +53,8 @@ var recentStart = recentEnd.advance(-recentMonths, "month");
 print("Recent window", recentStart.format("YYYY-MM-dd"), recentEnd.format("YYYY-MM-dd"));
 print("JRC occurrence threshold", jrcOccurrenceThreshold);
 print("JRC corridor expansion (m)", jrcCorridorExpandMeters);
+print("HydroSHEDS accumulation threshold", hydroAccThreshold);
+print("HydroSHEDS corridor expansion (m)", hydroCorridorExpandMeters);
 print("NDWI threshold", ndwiThreshold);
 print("MNDWI threshold", mndwiThreshold);
 
@@ -128,26 +132,58 @@ var jrcRiverCorridor = jrcRiverSeed
   .selfMask()
   .rename("JRC_RIVER_CORRIDOR");
 
+var hydroAcc = ee.Image("WWF/HydroSHEDS/15ACC")
+  .clip(aoi)
+  .rename("HYDRO_ACC");
+
+var hydroRiverSeed = hydroAcc.gte(hydroAccThreshold)
+  .selfMask()
+  .rename("HYDRO_RIVER_SEED");
+
+var hydroRiverCorridor = hydroRiverSeed
+  .focal_max(hydroCorridorExpandMeters, "circle", "meters")
+  .selfMask()
+  .rename("HYDRO_RIVER_CORRIDOR");
+
 var opticalWater = recent.select("NDWI").gt(ndwiThreshold)
   .or(recent.select("MNDWI").gt(mndwiThreshold))
+  .updateMask(obsCount.gte(minObsCount))
   .selfMask()
   .rename("OPTICAL_WATER");
 
 var riverAnalysisMask = opticalWater
-  .and(jrcRiverCorridor.unmask(0))
-  .updateMask(obsCount.gte(minObsCount))
   .selfMask()
   .rename("RIVER_ANALYSIS_MASK");
 
-var opticalOutsideCorridor = opticalWater
+var hydroConstrainedRiverMask = opticalWater
+  .and(hydroRiverCorridor.unmask(0))
+  .selfMask()
+  .rename("HYDRO_CONSTRAINED_RIVER_MASK");
+
+var jrcConstrainedRiverMask = opticalWater
+  .and(jrcRiverCorridor.unmask(0))
+  .selfMask()
+  .rename("JRC_CONSTRAINED_RIVER_MASK");
+
+var opticalOutsideHydro = opticalWater
+  .and(hydroRiverCorridor.unmask(0).not())
+  .selfMask()
+  .rename("OPTICAL_OUTSIDE_HYDRO");
+
+var opticalOutsideJrc = opticalWater
   .and(jrcRiverCorridor.unmask(0).not())
   .selfMask()
-  .rename("OPTICAL_OUTSIDE_CORRIDOR");
+  .rename("OPTICAL_OUTSIDE_JRC");
 
-var corridorWithoutOptical = jrcRiverCorridor
+var hydroWithoutOptical = hydroRiverCorridor
   .and(opticalWater.unmask(0).not())
   .selfMask()
-  .rename("CORRIDOR_WITHOUT_OPTICAL");
+  .rename("HYDRO_WITHOUT_OPTICAL");
+
+var jrcWithoutOptical = jrcRiverCorridor
+  .and(opticalWater.unmask(0).not())
+  .selfMask()
+  .rename("JRC_WITHOUT_OPTICAL");
 
 print("Optical water pixel count", opticalWater.reduceRegion({
   reducer: ee.Reducer.count(),
@@ -158,6 +194,22 @@ print("Optical water pixel count", opticalWater.reduceRegion({
 }).values().get(0));
 
 print("River analysis pixel count", riverAnalysisMask.reduceRegion({
+  reducer: ee.Reducer.count(),
+  geometry: aoi,
+  scale: scaleMeters,
+  bestEffort: true,
+  maxPixels: 1e9
+}).values().get(0));
+
+print("Hydro-constrained river pixel count", hydroConstrainedRiverMask.reduceRegion({
+  reducer: ee.Reducer.count(),
+  geometry: aoi,
+  scale: scaleMeters,
+  bestEffort: true,
+  maxPixels: 1e9
+}).values().get(0));
+
+print("JRC-constrained river pixel count", jrcConstrainedRiverMask.reduceRegion({
   reducer: ee.Reducer.count(),
   geometry: aoi,
   scale: scaleMeters,
@@ -226,10 +278,16 @@ Map.addLayer(obsCount, visObsCount, "QA observation count", false);
 Map.addLayer(jrcOccurrence, visOccurrence, "JRC water occurrence", false);
 Map.addLayer(jrcRiverSeed, {palette: ["42A5F5"]}, "JRC river seed", false);
 Map.addLayer(jrcRiverCorridor, {palette: ["90CAF9"]}, "JRC river corridor", false);
-Map.addLayer(opticalWater, {palette: ["00BFFF"]}, "Optical water mask", false);
-Map.addLayer(riverAnalysisMask, {palette: ["FFD54F"]}, "River analysis mask", true);
-Map.addLayer(opticalOutsideCorridor, {palette: ["FF00FF"]}, "QA optical water outside JRC corridor", false);
-Map.addLayer(corridorWithoutOptical, {palette: ["FF7043"]}, "QA JRC corridor without optical water", false);
+Map.addLayer(hydroRiverSeed, {palette: ["1E88E5"]}, "HydroSHEDS river seed", false);
+Map.addLayer(hydroRiverCorridor, {palette: ["64B5F6"]}, "HydroSHEDS river corridor", false);
+Map.addLayer(opticalWater, {palette: ["00BFFF"]}, "Optical water mask (primary)", true);
+Map.addLayer(riverAnalysisMask, {palette: ["FFD54F"]}, "River analysis mask (optical-first)", true);
+Map.addLayer(hydroConstrainedRiverMask, {palette: ["FF7043"]}, "Hydro-constrained river mask", false);
+Map.addLayer(jrcConstrainedRiverMask, {palette: ["AB47BC"]}, "JRC-constrained river mask", false);
+Map.addLayer(opticalOutsideHydro, {palette: ["FF1744"]}, "QA optical water outside HydroSHEDS corridor", false);
+Map.addLayer(opticalOutsideJrc, {palette: ["FF00FF"]}, "QA optical water outside JRC corridor", false);
+Map.addLayer(hydroWithoutOptical, {palette: ["FFB300"]}, "QA HydroSHEDS corridor without optical water", false);
+Map.addLayer(jrcWithoutOptical, {palette: ["FF7043"]}, "QA JRC corridor without optical water", false);
 
 Map.addLayer(waterProxyComposite, visProxyComposite, "Water proxy composite (TSS / NDTI / red-green)", true);
 Map.addLayer(tssWater, visTurbidity, "Water TSS proxy", false);
@@ -246,16 +304,16 @@ panel.add(ui.Label({
   style: {fontWeight: "bold", fontSize: "13px"}
 }));
 panel.add(ui.Label("Debug order:"));
-panel.add(ui.Label("[x] JRC water occurrence"));
+panel.add(ui.Label("[x] Optical water mask (primary river candidate)"));
+panel.add(ui.Label("[x] HydroSHEDS river corridor"));
 panel.add(ui.Label("[x] JRC river corridor"));
-panel.add(ui.Label("[x] Optical water mask"));
-panel.add(ui.Label("[x] Final river analysis mask"));
+panel.add(ui.Label("[x] Final river analysis mask (optical-first)"));
 panel.add(ui.Label("[x] Water proxy composite"));
 panel.add(ui.Label({
-  value: "If the river analysis mask is empty, compare the optical mask and JRC corridor first. Do not infer downstream effects until the river pixels look correct.",
+  value: "JRC and HydroSHEDS are QA/context layers here, not hard gates. If the optical mask looks right, trust that before adding constraints.",
   style: {fontSize: "11px", color: "B22222"}
 }));
 
 Map.add(panel);
 
-print("River characterization script ready. Start by toggling JRC water occurrence, JRC river corridor, optical water mask, and river analysis mask in that order.");
+print("River characterization script ready. Start with the optical water mask, then compare HydroSHEDS and JRC as QA/context layers.");
