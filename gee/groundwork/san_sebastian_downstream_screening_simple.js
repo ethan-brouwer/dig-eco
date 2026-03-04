@@ -221,19 +221,47 @@ Map.addLayer(redEdgeAnomaly, {min: -0.03, max: 0.03, palette: ["2166AC", "F7F7F7
 
 // ================= DISTANCE BINS =================
 var distanceBreaks = ee.List(distanceBinEdgesMeters);
+var emptyZoneGeom = ee.Geometry.Point([siteLon + 1, siteLat + 1]).buffer(1);
+
+function maskToZoneFeature(maskImg, props) {
+  var vectors = maskImg.selfMask().reduceToVectors({
+    geometry: aoi,
+    scale: scaleMeters,
+    geometryType: "polygon",
+    maxPixels: 1e9
+  });
+  var hasZone = vectors.size().gt(0);
+  var zoneGeom = ee.Geometry(ee.Algorithms.If(
+    hasZone,
+    vectors.geometry(),
+    emptyZoneGeom
+  ));
+
+  return ee.Feature(zoneGeom, ee.Dictionary(props).set("has_zone", hasZone));
+}
+
+function zoneMaskFromFeature(feature) {
+  feature = ee.Feature(feature);
+  var zoneType = ee.String(feature.get("zone_type"));
+  var inner = ee.Number(feature.get("inner_m"));
+  var outer = ee.Number(feature.get("outer_m"));
+  var hasZone = ee.Boolean(feature.get("has_zone"));
+
+  var mask = ee.Image(ee.Algorithms.If(
+    zoneType.compareTo("upstream").eq(0),
+    streamDistance.gte(Math.abs(outer)).and(streamDistance.lt(Math.abs(inner))).and(upstreamCorridor),
+    streamDistance.gte(inner).and(streamDistance.lt(outer)).and(downstreamCorridor)
+  ));
+
+  return ee.Image(ee.Algorithms.If(hasZone, mask.selfMask(), ee.Image(0).selfMask()));
+}
+
 var downstreamZones = ee.FeatureCollection(ee.List.sequence(0, distanceBreaks.length().subtract(2)).map(function(i) {
   i = ee.Number(i);
   var inner = ee.Number(distanceBreaks.get(i));
   var outer = ee.Number(distanceBreaks.get(i.add(1)));
   var zoneMask = streamDistance.gte(inner).and(streamDistance.lt(outer)).and(downstreamCorridor);
-  var zoneGeom = zoneMask.selfMask().reduceToVectors({
-    geometry: aoi,
-    scale: scaleMeters,
-    geometryType: "polygon",
-    maxPixels: 1e9
-  }).geometry();
-
-  return ee.Feature(zoneGeom, {
+  return maskToZoneFeature(zoneMask, {
     zone_id: ee.String("down_").cat(inner.format()).cat("_").cat(outer.format()),
     zone_type: "downstream",
     inner_m: inner,
@@ -246,21 +274,16 @@ var upstreamZoneMask = streamDistance.gte(Math.abs(upstreamControlRangeMeters[1]
   .and(streamDistance.lt(Math.abs(upstreamControlRangeMeters[0])))
   .and(upstreamCorridor);
 
-var upstreamZone = ee.Feature(
-  upstreamZoneMask.selfMask().reduceToVectors({
-    geometry: aoi,
-    scale: scaleMeters,
-    geometryType: "polygon",
-    maxPixels: 1e9
-  }).geometry(),
-  {
-    zone_id: "upstream_control",
-    zone_type: "upstream",
-    inner_m: upstreamControlRangeMeters[0],
-    outer_m: upstreamControlRangeMeters[1],
-    label: "Upstream control"
-  }
-);
+var upstreamZone = maskToZoneFeature(upstreamZoneMask, {
+  zone_id: "upstream_control",
+  zone_type: "upstream",
+  inner_m: upstreamControlRangeMeters[0],
+  outer_m: upstreamControlRangeMeters[1],
+  label: "Upstream control"
+});
+
+print("Downstream bin availability", downstreamZones.aggregate_array("has_zone"));
+print("Upstream control available", upstreamZone.get("has_zone"));
 
 Map.addLayer(downstreamZones.style({
   color: "FFA500",
@@ -280,10 +303,10 @@ var downZone0 = ee.Feature(downstreamZoneList.get(0));
 var downZone1 = ee.Feature(downstreamZoneList.get(1));
 var downZone2 = ee.Feature(downstreamZoneList.get(2));
 
-var downZone0Pixels = waterDownstream.clip(downZone0.geometry()).selfMask().rename("DOWN_0_500_PX");
-var downZone1Pixels = waterDownstream.clip(downZone1.geometry()).selfMask().rename("DOWN_500_1500_PX");
-var downZone2Pixels = waterDownstream.clip(downZone2.geometry()).selfMask().rename("DOWN_1500_3000_PX");
-var upstreamZonePixels = waterUpstream.clip(upstreamZone.geometry()).selfMask().rename("UPSTREAM_CONTROL_PX");
+var downZone0Pixels = waterDownstream.updateMask(zoneMaskFromFeature(downZone0)).selfMask().rename("DOWN_0_500_PX");
+var downZone1Pixels = waterDownstream.updateMask(zoneMaskFromFeature(downZone1)).selfMask().rename("DOWN_500_1500_PX");
+var downZone2Pixels = waterDownstream.updateMask(zoneMaskFromFeature(downZone2)).selfMask().rename("DOWN_1500_3000_PX");
+var upstreamZonePixels = waterUpstream.updateMask(zoneMaskFromFeature(upstreamZone)).selfMask().rename("UPSTREAM_CONTROL_PX");
 
 Map.addLayer(downZone0Pixels, {palette: ["FF0000"]}, "QA bin pixels 0-500 m", false);
 Map.addLayer(downZone1Pixels, {palette: ["FF9800"]}, "QA bin pixels 500-1500 m", false);
@@ -292,11 +315,10 @@ Map.addLayer(upstreamZonePixels, {palette: ["2962FF"]}, "QA upstream control pix
 
 // ================= ZONAL SUMMARIES =================
 function summarizeZone(feature, img, maskImg) {
-  var geom = feature.geometry();
-  var zoneMask = ee.Image.constant(1).updateMask(maskImg).clip(geom);
+  var zoneMask = ee.Image.constant(1).updateMask(maskImg).updateMask(zoneMaskFromFeature(feature));
   var waterDict = zoneMask.reduceRegion({
     reducer: ee.Reducer.count(),
-    geometry: geom,
+    geometry: aoi,
     scale: scaleMeters,
     bestEffort: true,
     maxPixels: 1e9
@@ -311,7 +333,7 @@ function summarizeZone(feature, img, maskImg) {
 
   var stats = img.select(["TSS_PROXY", "NDTI", "RED_EDGE_TURB"]).updateMask(maskImg).reduceRegion({
     reducer: ee.Reducer.mean(),
-    geometry: geom,
+    geometry: aoi,
     scale: scaleMeters,
     bestEffort: true,
     maxPixels: 1e9
@@ -419,11 +441,13 @@ var monthlyStats = ee.FeatureCollection(monthlyStarts.map(function(start) {
     var upMask = w.and(upstreamCorridor).selfMask();
 
     function zoneMean(zoneFeature, corridorMask, bandName) {
-      var zoneGeom = zoneFeature.geometry();
-      var zoneMask = ee.Image.constant(1).updateMask(w).updateMask(corridorMask).clip(zoneGeom);
+      var zoneMask = ee.Image.constant(1)
+        .updateMask(w)
+        .updateMask(corridorMask)
+        .updateMask(zoneMaskFromFeature(zoneFeature));
       var pxDict = zoneMask.reduceRegion({
         reducer: ee.Reducer.count(),
-        geometry: zoneGeom,
+        geometry: aoi,
         scale: scaleMeters,
         bestEffort: true,
         maxPixels: 1e9
@@ -437,7 +461,7 @@ var monthlyStats = ee.FeatureCollection(monthlyStarts.map(function(start) {
 
       var mean = img.select(bandName).updateMask(w).updateMask(corridorMask).reduceRegion({
         reducer: ee.Reducer.mean(),
-        geometry: zoneGeom,
+        geometry: aoi,
         scale: scaleMeters,
         bestEffort: true,
         maxPixels: 1e9
