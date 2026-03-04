@@ -15,11 +15,18 @@ var siteLat = 13.6509;
 var aoiRadiusMeters = 5000;
 var recentMonths = 12;
 var cloudMax = 60;
+var minObsCount = 3;
+var useWetSeasonFilter = true;
+var wetSeasonMonths = [5, 6, 7, 8, 9, 10];
 
 // Keep tuning minimal: only these two controls usually matter most.
 var opticalOccurrenceThreshold = 0.10;  // fraction of images flagged as water
 var ndwiThreshold = 0.05;
 var mndwiThreshold = 0.02;
+var minConnectedPixels = 8;
+var hydroAccThreshold = 15;
+var hydroAssistOccurrenceThreshold = 0.06;
+var hydroCorridorExpandMeters = 80;
 
 // ================= MAP SETUP =================
 Map.setOptions("SATELLITE");
@@ -36,6 +43,11 @@ print("Recent window", startDate.format("YYYY-MM-dd"), endDate.format("YYYY-MM-d
 print("Occurrence threshold", opticalOccurrenceThreshold);
 print("NDWI threshold", ndwiThreshold);
 print("MNDWI threshold", mndwiThreshold);
+print("Minimum observations", minObsCount);
+print("Wet-season month filter", useWetSeasonFilter ? wetSeasonMonths : "OFF");
+print("Minimum connected pixels", minConnectedPixels);
+print("HydroSHEDS accumulation threshold", hydroAccThreshold);
+print("Hydro assist occurrence threshold", hydroAssistOccurrenceThreshold);
 
 // ================= S2 HELPERS =================
 function maskS2(img) {
@@ -61,21 +73,32 @@ function addWaterBands(img) {
   return img.addBands([ndwi, mndwi]);
 }
 
+function addMonth(img) {
+  return img.set("month", ee.Date(img.get("system:time_start")).get("month"));
+}
+
 var s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
   .filterBounds(aoi)
   .filterDate(startDate, endDate)
   .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", cloudMax))
   .map(maskS2)
   .map(scaleS2)
+  .map(addMonth)
   .map(addWaterBands);
+
+if (useWetSeasonFilter) {
+  s2 = s2.filter(ee.Filter.inList("month", wetSeasonMonths));
+}
 
 print("Recent image count", s2.size());
 
 var recent = s2.median().clip(aoi);
 var obsCount = s2.select("B4").count().clip(aoi).rename("OBS_COUNT");
+var enoughObs = obsCount.gte(minObsCount);
 
 var opticalInstant = recent.select("NDWI").gt(ndwiThreshold)
   .or(recent.select("MNDWI").gt(mndwiThreshold))
+  .updateMask(enoughObs)
   .selfMask()
   .rename("OPTICAL_INSTANT");
 
@@ -85,10 +108,36 @@ var opticalFraction = s2.map(function(img) {
 }).mean().clip(aoi).rename("OPTICAL_WATER_FRACTION");
 
 var opticalOccurrence = opticalFraction.gte(opticalOccurrenceThreshold)
+  .updateMask(enoughObs)
   .selfMask()
   .rename("OPTICAL_OCCURRENCE");
 
-var riverMask = opticalOccurrence.or(opticalInstant).selfMask().rename("RIVER_MASK");
+var rawRiverMask = opticalOccurrence.or(opticalInstant).selfMask().rename("RIVER_MASK_RAW");
+
+var connectedMask = rawRiverMask.connectedPixelCount(100, true)
+  .gte(minConnectedPixels)
+  .selfMask()
+  .rename("CONNECTED_MASK");
+
+var filteredRiverMask = rawRiverMask
+  .updateMask(connectedMask)
+  .focal_max(20, "circle", "meters")
+  .focal_min(20, "circle", "meters")
+  .selfMask()
+  .rename("RIVER_MASK_FILTERED");
+
+var hydroAcc = ee.Image("WWF/HydroSHEDS/15ACC").clip(aoi).rename("HYDRO_ACC");
+var hydroCorridor = hydroAcc.gte(hydroAccThreshold)
+  .focal_max(hydroCorridorExpandMeters, "circle", "meters")
+  .selfMask()
+  .rename("HYDRO_CORRIDOR");
+
+var hydroAssistMask = hydroCorridor
+  .and(opticalFraction.gte(hydroAssistOccurrenceThreshold))
+  .selfMask()
+  .rename("HYDRO_ASSIST_MASK");
+
+var riverMask = filteredRiverMask.or(hydroAssistMask).selfMask().rename("RIVER_MASK");
 
 print("Instant optical pixel count", opticalInstant.reduceRegion({
   reducer: ee.Reducer.count(),
@@ -99,6 +148,14 @@ print("Instant optical pixel count", opticalInstant.reduceRegion({
 }).values().get(0));
 
 print("Occurrence optical pixel count", opticalOccurrence.reduceRegion({
+  reducer: ee.Reducer.count(),
+  geometry: aoi,
+  scale: 20,
+  bestEffort: true,
+  maxPixels: 1e9
+}).values().get(0));
+
+print("Filtered river-mask pixel count", filteredRiverMask.reduceRegion({
   reducer: ee.Reducer.count(),
   geometry: aoi,
   scale: 20,
@@ -126,6 +183,10 @@ Map.addLayer(obsCount, visObs, "QA observation count", false);
 Map.addLayer(opticalFraction, visFraction, "Optical water occurrence fraction", true);
 Map.addLayer(opticalInstant, {palette: ["00B8D4"]}, "Optical instant mask", false);
 Map.addLayer(opticalOccurrence, {palette: ["26C6DA"]}, "Optical occurrence mask", false);
+Map.addLayer(rawRiverMask, {palette: ["FFF176"]}, "River mask raw", false);
+Map.addLayer(filteredRiverMask, {palette: ["FFB300"]}, "River mask filtered", false);
+Map.addLayer(hydroCorridor, {palette: ["64B5F6"]}, "HydroSHEDS corridor", false);
+Map.addLayer(hydroAssistMask, {palette: ["1E88E5"]}, "Hydro-assisted mask", false);
 Map.addLayer(riverMask, {palette: ["FFD54F"]}, "River mask (visual QA)", true);
 
 var panel = ui.Panel({style: {position: "top-right", width: "340px", padding: "8px"}});
@@ -136,6 +197,7 @@ panel.add(ui.Label({
 panel.add(ui.Label("Tune only these first:"));
 panel.add(ui.Label("1) opticalOccurrenceThreshold"));
 panel.add(ui.Label("2) ndwiThreshold / mndwiThreshold"));
+panel.add(ui.Label("3) minConnectedPixels"));
 panel.add(ui.Label({
   value: "Goal: yellow mask should cover visible channel portions without flooding adjacent land.",
   style: {fontSize: "11px", color: "B22222"}
