@@ -71,6 +71,7 @@ function addIndices(img) {
   var ndwi = img.normalizedDifference(["B3", "B8"]).rename("NDWI");
   var mndwi = img.normalizedDifference(["B3", "B11"]).rename("MNDWI");
   var ndti = img.normalizedDifference(["B4", "B3"]).rename("NDTI");
+  var redGreen = red.divide(green).rename("RED_GREEN");
 
   var bsi = img.expression(
     "((SWIR + RED) - (NIR + BLUE)) / ((SWIR + RED) + (NIR + BLUE))",
@@ -80,7 +81,7 @@ function addIndices(img) {
   var ioi = red.divide(blue).rename("IOI");
   var tssProxy = red.multiply(1000).rename("TSS_PROXY");
 
-  return img.addBands([ndvi, ndmi, ndwi, mndwi, ndti, bsi, ioi, tssProxy]);
+  return img.addBands([ndvi, ndmi, ndwi, mndwi, ndti, redGreen, bsi, ioi, tssProxy]);
 }
 
 function buildS2Collection(start, end) {
@@ -105,18 +106,30 @@ print("Recent image count", recentCol.size());
 var recent = recentCol.median().clip(aoi);
 var recentObsCount = recentCol.select("B4").count().clip(aoi).rename("RECENT_OBS_COUNT");
 
-// ================= WATER MASK + WATER PROXIES =================
+// ================= RIVER CONTEXT + WATER PROXIES =================
 var jrcWater = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select("occurrence");
 var permanentWater = jrcWater.gte(50).clip(aoi).rename("PERMANENT_WATER");
+var hydroAcc = ee.Image("WWF/HydroSHEDS/15ACC").clip(aoi).rename("HYDRO_ACC");
+var coarseRiverContext = hydroAcc.gte(50).selfMask().rename("COARSE_RIVER_CONTEXT");
 
 function waterMask(img) {
   var opticalWater = img.select("NDWI").gt(0.12).or(img.select("MNDWI").gt(0.15));
   return opticalWater.and(permanentWater);
 }
 
-var stableWaterMask = waterMask(recent).selfMask().rename("STABLE_WATER");
-var recentTurbidity = recent.select("TSS_PROXY").updateMask(stableWaterMask).rename("TSS_RECENT");
-var recentNDTIWater = recent.select("NDTI").updateMask(stableWaterMask).rename("NDTI_WATER");
+var currentWaterMask = waterMask(recent).selfMask().rename("CURRENT_WATER");
+var riverAnalysisMask = currentWaterMask.and(coarseRiverContext.unmask(0)).selfMask().rename("RIVER_ANALYSIS_MASK");
+var excludedFromRiverMask = currentWaterMask.and(riverAnalysisMask.not()).selfMask().rename("EXCLUDED_FROM_RIVER_MASK");
+
+var recentTurbidity = recent.select("TSS_PROXY").updateMask(riverAnalysisMask).rename("TSS_RECENT");
+var recentNDTIWater = recent.select("NDTI").updateMask(riverAnalysisMask).rename("NDTI_WATER");
+var recentRedGreenWater = recent.select("RED_GREEN").updateMask(riverAnalysisMask).rename("RED_GREEN_WATER");
+
+var waterProxyComposite = ee.Image.cat([
+  recent.select("TSS_PROXY").unitScale(20, 220).clamp(0, 1),
+  recent.select("NDTI").unitScale(-0.1, 0.25).clamp(0, 1),
+  recent.select("RED_GREEN").unitScale(0.7, 2.0).clamp(0, 1)
+]).updateMask(riverAnalysisMask).rename(["TSS_RGB", "NDTI_RGB", "RED_GREEN_RGB"]);
 
 // ================= VISUALIZATION =================
 var visTrueColor = {bands: ["B4", "B3", "B2"], min: 0.02, max: 0.30};
@@ -128,6 +141,7 @@ var visNDTI = {min: -0.3, max: 0.4, palette: ["2166ac", "f7f7f7", "b2182b"]};
 var visRatio = {min: 0.7, max: 2.0, palette: ["f7fbff", "fdae61", "d73027"]};
 var visTurbidity = {min: 20, max: 300, palette: ["08306b", "41b6c4", "ffffbf", "fdae61", "d73027"]};
 var visObsCount = {min: 0, max: 30, palette: ["2b2b2b", "f7f7f7", "00ff00"]};
+var visProxyComposite = {bands: ["TSS_RGB", "NDTI_RGB", "RED_GREEN_RGB"], min: 0, max: 1};
 
 // ================= MAP LAYERS =================
 Map.addLayer(recent, visTrueColor, "Recent composite (true color)", true);
@@ -138,10 +152,15 @@ Map.addLayer(recent.select("NDMI"), visNdmi, "NDMI (moisture stress proxy)", fal
 Map.addLayer(recent.select("BSI"), visBsi, "BSI (bare/disturbed surface proxy)", true);
 Map.addLayer(recent.select("IOI"), visRatio, "IOI (iron-oxide proxy)", false);
 
+Map.addLayer(coarseRiverContext, {palette: ["90CAF9"]}, "Coarse river context (HydroSHEDS)", false);
 Map.addLayer(permanentWater.selfMask(), {palette: ["4FC3F7"]}, "Permanent water (JRC)", false);
-Map.addLayer(stableWaterMask, {palette: ["00BFFF"]}, "Current water mask (optical + JRC)", true);
+Map.addLayer(currentWaterMask, {palette: ["00BFFF"]}, "Current water mask (optical + JRC)", false);
+Map.addLayer(riverAnalysisMask, {palette: ["FFD54F"]}, "River analysis mask", true);
+Map.addLayer(excludedFromRiverMask, {palette: ["FF00FF"]}, "QA excluded from river analysis mask", false);
+Map.addLayer(waterProxyComposite, visProxyComposite, "Water proxy composite (TSS / NDTI / red-green)", true);
 Map.addLayer(recentTurbidity, visTurbidity, "Water turbidity/TSS proxy", true);
 Map.addLayer(recentNDTIWater, visNDTI, "Water NDTI (discoloration proxy)", false);
+Map.addLayer(recentRedGreenWater, visRatio, "Water red/green ratio", false);
 
 Map.addLayer(recentObsCount, visObsCount, "QA: recent observation count", false);
 
@@ -165,6 +184,8 @@ panel.add(ui.Label("[x] NDVI (vegetation condition)"));
 panel.add(ui.Label("[x] BSI (bare/disturbed surface proxy)"));
 panel.add(ui.Label("[x] NDMI (moisture stress proxy)"));
 panel.add(ui.Label("[x] IOI (iron-oxide proxy)"));
+panel.add(ui.Label("[x] Coarse river context + river analysis mask"));
+panel.add(ui.Label("[x] Water proxy composite (TSS / NDTI / red-green)"));
 panel.add(ui.Label("[x] Water mask + turbidity/NDTI water proxies"));
 panel.add(ui.Label("[x] QA image-count layer"));
 panel.add(ui.Label({
