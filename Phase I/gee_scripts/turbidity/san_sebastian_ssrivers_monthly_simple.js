@@ -13,7 +13,7 @@ var siteLat = 13.6509;
 
 var recentMonths = 12;
 var cloudMax = 60;
-var corridorBufferMeters = 120;
+var corridorBufferMeters = 50;
 var useWetSeasonFilter = false;
 var wetSeasonMonths = [5, 6, 7, 8, 9, 10];
 
@@ -21,7 +21,9 @@ var wetSeasonMonths = [5, 6, 7, 8, 9, 10];
 var ndwiThreshold = -0.02;
 var mndwiThreshold = -0.05;
 var minObsCount = 2;
+var minWaterPixelsPerMonth = 2;
 var noDataValue = -9999;
+var useCorridorDirectly = true;
 
 // ================= MAP SETUP =================
 Map.setOptions("SATELLITE");
@@ -57,6 +59,8 @@ print("Corridor buffer (m)", corridorBufferMeters);
 print("Wet season filter", useWetSeasonFilter ? wetSeasonMonths : "OFF");
 print("NDWI threshold", ndwiThreshold);
 print("MNDWI threshold", mndwiThreshold);
+print("Min water pixels per month", minWaterPixelsPerMonth);
+print("Use corridor directly for stats", useCorridorDirectly);
 
 // ================= S2 HELPERS =================
 function maskS2(img) {
@@ -110,6 +114,7 @@ print("Image count", s2.size());
 var recent = s2.median().clip(aoi);
 var obsCount = s2.select("B4").count().clip(aoi).rename("OBS_COUNT");
 var enoughObs = obsCount.gte(minObsCount);
+var analysisAreaMask = corridorMask.updateMask(enoughObs).selfMask().rename("ANALYSIS_AREA_MASK");
 
 var riverMask = recent.select("NDWI").gt(ndwiThreshold)
   .or(recent.select("MNDWI").gt(mndwiThreshold))
@@ -118,21 +123,30 @@ var riverMask = recent.select("NDWI").gt(ndwiThreshold)
   .selfMask()
   .rename("RIVER_MASK");
 
-var tssWater = recent.select("TSS_PROXY").updateMask(riverMask).rename("TSS_WATER");
-var ndtiWater = recent.select("NDTI").updateMask(riverMask).rename("NDTI_WATER");
-var redGreenWater = recent.select("RED_GREEN").updateMask(riverMask).rename("RED_GREEN_WATER");
+// Stable fallback mask from the full period, restricted to corridor.
+var referenceRiverMask = riverMask.rename("REFERENCE_RIVER_MASK");
+var currentAnalysisMask = ee.Image(ee.Algorithms.If(useCorridorDirectly, analysisAreaMask, riverMask))
+  .selfMask()
+  .rename("CURRENT_ANALYSIS_MASK");
+
+var tssWater = recent.select("TSS_PROXY").updateMask(currentAnalysisMask).rename("TSS_WATER");
+var ndtiWater = recent.select("NDTI").updateMask(currentAnalysisMask).rename("NDTI_WATER");
+var redGreenWater = recent.select("RED_GREEN").updateMask(currentAnalysisMask).rename("RED_GREEN_WATER");
 
 var waterProxyComposite = ee.Image.cat([
   recent.select("TSS_PROXY").unitScale(20, 220).clamp(0, 1),
   recent.select("NDTI").unitScale(-0.1, 0.25).clamp(0, 1),
   recent.select("RED_GREEN").unitScale(0.7, 2.0).clamp(0, 1)
-]).updateMask(riverMask).rename(["TSS_RGB", "NDTI_RGB", "RED_GREEN_RGB"]);
+]).updateMask(currentAnalysisMask).rename(["TSS_RGB", "NDTI_RGB", "RED_GREEN_RGB"]);
 
 Map.addLayer(recent, {bands: ["B4", "B3", "B2"], min: 0.02, max: 0.30}, "Recent composite (true color)", true);
 Map.addLayer(recent, {bands: ["B8", "B4", "B3"], min: 0.03, max: 0.45}, "Recent composite (false color)", false);
 Map.addLayer(obsCount, {min: 0, max: 30, palette: ["2b2b2b", "f7f7f7", "00ff00"]}, "QA observation count", false);
 Map.addLayer(corridorMask, {palette: ["FFF59D"]}, "Corridor mask", false);
 Map.addLayer(riverMask, {palette: ["FFD54F"]}, "River mask", true);
+Map.addLayer(analysisAreaMask, {palette: ["FFB300"]}, "Analysis area mask (corridor+obs)", false);
+Map.addLayer(currentAnalysisMask, {palette: ["FF6F00"]}, "Current analysis mask", false);
+Map.addLayer(referenceRiverMask, {palette: ["FFB300"]}, "Reference river mask (fallback)", false);
 Map.addLayer(waterProxyComposite, {bands: ["TSS_RGB", "NDTI_RGB", "RED_GREEN_RGB"], min: 0, max: 1}, "Water proxy composite", true);
 Map.addLayer(tssWater, {min: 20, max: 300, palette: ["08306b", "41b6c4", "ffffbf", "fdae61", "d73027"]}, "TSS proxy (water)", false);
 Map.addLayer(ndtiWater, {min: -0.3, max: 0.4, palette: ["2166AC", "F7F7F7", "B2182B"]}, "NDTI (water)", false);
@@ -166,6 +180,7 @@ var monthlyStats = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
     date: mStart.format("YYYY-MM"),
     image_count: count,
     water_px: 0,
+    qa_flag: "no_images",
     tss_proxy: noDataValue,
     ndti: noDataValue,
     red_green: noDataValue
@@ -180,7 +195,24 @@ var monthlyStats = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
       .updateMask(corridorMask)
       .selfMask();
 
-    var waterPx = safeNumber(mMask.reduceRegion({
+    var monthAreaMask = corridorMask.updateMask(mObs.gte(minObsCount)).selfMask();
+
+    var monthWaterPx = safeNumber(mMask.reduceRegion({
+      reducer: ee.Reducer.count(),
+      geometry: riverCorridor,
+      scale: 20,
+      bestEffort: true,
+      maxPixels: 1e9
+    }).values().get(0));
+
+    var useFallback = monthWaterPx.lt(minWaterPixelsPerMonth);
+    var analysisMask = ee.Image(ee.Algorithms.If(
+      useCorridorDirectly,
+      monthAreaMask,
+      ee.Algorithms.If(useFallback, referenceRiverMask, mMask)
+    ));
+
+    var analysisWaterPx = safeNumber(analysisMask.reduceRegion({
       reducer: ee.Reducer.count(),
       geometry: riverCorridor,
       scale: 20,
@@ -189,7 +221,7 @@ var monthlyStats = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
     }).values().get(0));
 
     var stats = img.select(["TSS_PROXY", "NDTI", "RED_GREEN"])
-      .updateMask(mMask)
+      .updateMask(analysisMask)
       .reduceRegion({
         reducer: ee.Reducer.mean(),
         geometry: riverCorridor,
@@ -198,13 +230,19 @@ var monthlyStats = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
         maxPixels: 1e9
       });
 
-    var enoughWater = waterPx.gte(5);
+    var enoughWater = analysisWaterPx.gte(minWaterPixelsPerMonth);
 
     return ee.Feature(null, {
       "system:time_start": mStart.millis(),
       date: mStart.format("YYYY-MM"),
       image_count: count,
-      water_px: waterPx,
+      water_px: analysisWaterPx,
+      month_water_px: monthWaterPx,
+      qa_flag: ee.Algorithms.If(
+        useCorridorDirectly,
+        "corridor_direct",
+        ee.Algorithms.If(useFallback, "fallback_reference_mask", "monthly_mask")
+      ),
       tss_proxy: ee.Algorithms.If(enoughWater, safeNumber(stats.get("TSS_PROXY")), noDataValue),
       ndti: ee.Algorithms.If(enoughWater, safeNumber(stats.get("NDTI")), noDataValue),
       red_green: ee.Algorithms.If(enoughWater, safeNumber(stats.get("RED_GREEN")), noDataValue)
