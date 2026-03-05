@@ -13,10 +13,10 @@ var siteName = "San Sebastian Mine (MRDS)";
 var siteLon = -87.93002;
 var siteLat = 13.6509;
 
-var analysisYears = 4;
+var analysisStartYear = 2020;
 var cloudMax = 60;
 var corridorBufferMeters = 50;
-var useWetSeasonFilter = false;
+var useWetSeasonFilter = true;
 var wetSeasonMonths = [5, 6, 7, 8, 9, 10];
 
 var ndwiThreshold = -0.02;
@@ -67,11 +67,12 @@ Map.addLayer(aoi, {color: "FFFFFF"}, "AOI", false);
 
 // ================= DATE WINDOW =================
 var currentYear = new Date().getUTCFullYear();
-var startYear = currentYear - (analysisYears - 1);
+var startYear = analysisStartYear;
 var endDate = ee.Date(Date.now());
 var startDate = ee.Date.fromYMD(startYear, 1, 1);
 
 print("Analysis window", startDate.format("YYYY-MM-dd"), endDate.format("YYYY-MM-dd"));
+print("Analysis start year", analysisStartYear);
 print("Buffer (m)", corridorBufferMeters);
 print("Wet season filter", useWetSeasonFilter ? wetSeasonMonths : "OFF");
 print("NDWI threshold", ndwiThreshold);
