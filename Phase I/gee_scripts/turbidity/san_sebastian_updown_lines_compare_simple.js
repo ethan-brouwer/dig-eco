@@ -1,11 +1,14 @@
 /*
   FILE: Phase I/gee_scripts/turbidity/san_sebastian_updown_lines_compare_simple.js
-  PURPOSE: Compare upstream1 vs downstream1 proxy behavior by month.
+  PURPOSE: Compare multi-reach proxy behavior by month.
 
   REQUIREMENT (GEE Imports)
   - impact_point
+  - SSrivers
   - upstream1
   - downstream1
+  - upstream_pre_dam
+  - downstream_urban
 */
 
 // ================= USER SETTINGS =================
@@ -41,17 +44,30 @@ function toGeometry(obj) {
 }
 
 var impactGeom = toGeometry(impact_point);
+var ssRiversGeom = toGeometry(SSrivers);
 var upstreamGeom = toGeometry(upstream1);
 var downstreamGeom = toGeometry(downstream1);
+var upstreamPreDamGeom = toGeometry(upstream_pre_dam);
+var downstreamUrbanGeom = toGeometry(downstream_urban);
 
+var ssRiversCorridor = ssRiversGeom.buffer(corridorBufferMeters);
+var upstreamPreDamCorridor = upstreamPreDamGeom.buffer(corridorBufferMeters);
 var upstreamCorridor = upstreamGeom.buffer(corridorBufferMeters);
 var downstreamCorridor = downstreamGeom.buffer(corridorBufferMeters);
-var combinedCorridor = upstreamCorridor.union(downstreamCorridor, 1);
+var downstreamUrbanCorridor = downstreamUrbanGeom.buffer(corridorBufferMeters);
+var combinedCorridor = ssRiversCorridor
+  .union(upstreamPreDamCorridor, 1)
+  .union(upstreamCorridor, 1)
+  .union(downstreamCorridor, 1)
+  .union(downstreamUrbanCorridor, 1);
 var aoi = combinedCorridor.bounds().buffer(1000);
 
 var reaches = ee.FeatureCollection([
+  ee.Feature(ssRiversCorridor, {reach_id: "SSrivers", reach_type: "reference"}),
+  ee.Feature(upstreamPreDamCorridor, {reach_id: "upstream_pre_dam", reach_type: "upstream"}),
   ee.Feature(upstreamCorridor, {reach_id: "upstream1", reach_type: "upstream"}),
-  ee.Feature(downstreamCorridor, {reach_id: "downstream1", reach_type: "downstream"})
+  ee.Feature(downstreamCorridor, {reach_id: "downstream1", reach_type: "downstream"}),
+  ee.Feature(downstreamUrbanCorridor, {reach_id: "downstream_urban", reach_type: "downstream"})
 ]);
 
 // ================= MAP SETUP =================
@@ -59,10 +75,16 @@ Map.setOptions("SATELLITE");
 Map.centerObject(impactGeom, 12);
 Map.addLayer(ee.Geometry.Point([siteLon, siteLat]), {color: "FF0000"}, siteName, false);
 Map.addLayer(impactGeom, {color: "FFFF00"}, "impact_point", true);
+Map.addLayer(ssRiversGeom, {color: "26A69A"}, "SSrivers line", true);
+Map.addLayer(upstreamPreDamGeom, {color: "1565C0"}, "upstream_pre_dam line", true);
 Map.addLayer(upstreamGeom, {color: "2962FF"}, "upstream1 line", true);
 Map.addLayer(downstreamGeom, {color: "FF6D00"}, "downstream1 line", true);
+Map.addLayer(downstreamUrbanGeom, {color: "8E24AA"}, "downstream_urban line", true);
+Map.addLayer(ssRiversCorridor, {color: "26A69A"}, "SSrivers corridor", false);
+Map.addLayer(upstreamPreDamCorridor, {color: "1565C0"}, "upstream_pre_dam corridor", false);
 Map.addLayer(upstreamCorridor, {color: "2962FF"}, "upstream corridor", false);
 Map.addLayer(downstreamCorridor, {color: "FF6D00"}, "downstream corridor", false);
+Map.addLayer(downstreamUrbanCorridor, {color: "8E24AA"}, "downstream_urban corridor", false);
 Map.addLayer(aoi, {color: "FFFFFF"}, "AOI", false);
 
 // ================= DATE WINDOW =================
@@ -136,6 +158,18 @@ var recent = s2.median().clip(aoi);
 var obsCount = s2.select("B4").count().clip(aoi);
 var enoughObs = obsCount.gte(minObsCount);
 
+var refMaskCurrent = recent.select("NDWI").gt(ndwiThreshold)
+  .or(recent.select("MNDWI").gt(mndwiThreshold))
+  .updateMask(enoughObs)
+  .updateMask(corridorMask(ssRiversCorridor))
+  .selfMask();
+
+var upPreDamMaskCurrent = recent.select("NDWI").gt(ndwiThreshold)
+  .or(recent.select("MNDWI").gt(mndwiThreshold))
+  .updateMask(enoughObs)
+  .updateMask(corridorMask(upstreamPreDamCorridor))
+  .selfMask();
+
 var upMaskCurrent = recent.select("NDWI").gt(ndwiThreshold)
   .or(recent.select("MNDWI").gt(mndwiThreshold))
   .updateMask(enoughObs)
@@ -148,7 +182,19 @@ var downMaskCurrent = recent.select("NDWI").gt(ndwiThreshold)
   .updateMask(corridorMask(downstreamCorridor))
   .selfMask();
 
-var currentMask = upMaskCurrent.or(downMaskCurrent).selfMask().rename("CURRENT_MASK");
+var downUrbanMaskCurrent = recent.select("NDWI").gt(ndwiThreshold)
+  .or(recent.select("MNDWI").gt(mndwiThreshold))
+  .updateMask(enoughObs)
+  .updateMask(corridorMask(downstreamUrbanCorridor))
+  .selfMask();
+
+var currentMask = refMaskCurrent
+  .or(upPreDamMaskCurrent)
+  .or(upMaskCurrent)
+  .or(downMaskCurrent)
+  .or(downUrbanMaskCurrent)
+  .selfMask()
+  .rename("CURRENT_MASK");
 var waterProxyComposite = ee.Image.cat([
   recent.select("TSS_PROXY").unitScale(20, 220).clamp(0, 1),
   recent.select("NDTI").unitScale(-0.1, 0.25).clamp(0, 1),
@@ -158,8 +204,11 @@ var waterProxyComposite = ee.Image.cat([
 Map.addLayer(recent, {bands: ["B4", "B3", "B2"], min: 0.02, max: 0.30}, "Recent composite (true color)", true);
 Map.addLayer(recent, {bands: ["B8", "B4", "B3"], min: 0.03, max: 0.45}, "Recent composite (false color)", false);
 Map.addLayer(obsCount, {min: 0, max: 30, palette: ["2b2b2b", "f7f7f7", "00ff00"]}, "QA observation count", false);
+Map.addLayer(refMaskCurrent, {palette: ["26A69A"]}, "Current SSrivers mask", false);
+Map.addLayer(upPreDamMaskCurrent, {palette: ["1565C0"]}, "Current upstream_pre_dam mask", false);
 Map.addLayer(upMaskCurrent, {palette: ["2962FF"]}, "Current upstream mask", false);
 Map.addLayer(downMaskCurrent, {palette: ["FF6D00"]}, "Current downstream mask", false);
+Map.addLayer(downUrbanMaskCurrent, {palette: ["8E24AA"]}, "Current downstream_urban mask", false);
 Map.addLayer(currentMask, {palette: ["FFD54F"]}, "Current combined mask", true);
 Map.addLayer(waterProxyComposite, {bands: ["TSS_RGB", "NDTI_RGB", "RED_GREEN_RGB"], min: 0, max: 1}, "Water proxy composite", true);
 
@@ -262,39 +311,39 @@ var monthlyChartFc = monthlyLong.map(function(f) {
   });
 });
 
-var tssCompareChart = ui.Chart.feature.groups(monthlyChartFc.filter(ee.Filter.notNull(["tss_chart"])), "date", "tss_chart", "reach_type")
+var tssCompareChart = ui.Chart.feature.groups(monthlyChartFc.filter(ee.Filter.notNull(["tss_chart"])), "date", "tss_chart", "reach_id")
   .setChartType("LineChart")
   .setOptions({
-    title: "Monthly TSS Proxy: Upstream vs Downstream",
+    title: "Monthly TSS Proxy by Reach",
     hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
     vAxis: {title: "TSS proxy"},
     lineWidth: 2,
     pointSize: 3,
-    colors: ["#2962FF", "#FF6D00"]
+    colors: ["#26A69A", "#1565C0", "#2962FF", "#FF6D00", "#8E24AA"]
   });
 print(tssCompareChart);
 
-var ndtiCompareChart = ui.Chart.feature.groups(monthlyChartFc.filter(ee.Filter.notNull(["ndti_chart"])), "date", "ndti_chart", "reach_type")
+var ndtiCompareChart = ui.Chart.feature.groups(monthlyChartFc.filter(ee.Filter.notNull(["ndti_chart"])), "date", "ndti_chart", "reach_id")
   .setChartType("LineChart")
   .setOptions({
-    title: "Monthly NDTI: Upstream vs Downstream",
+    title: "Monthly NDTI by Reach",
     hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
     vAxis: {title: "NDTI"},
     lineWidth: 2,
     pointSize: 3,
-    colors: ["#2962FF", "#FF6D00"]
+    colors: ["#26A69A", "#1565C0", "#2962FF", "#FF6D00", "#8E24AA"]
   });
 print(ndtiCompareChart);
 
-var redGreenCompareChart = ui.Chart.feature.groups(monthlyChartFc.filter(ee.Filter.notNull(["red_green_chart"])), "date", "red_green_chart", "reach_type")
+var redGreenCompareChart = ui.Chart.feature.groups(monthlyChartFc.filter(ee.Filter.notNull(["red_green_chart"])), "date", "red_green_chart", "reach_id")
   .setChartType("LineChart")
   .setOptions({
-    title: "Monthly Red/Green Ratio: Upstream vs Downstream",
+    title: "Monthly Red/Green Ratio by Reach",
     hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
     vAxis: {title: "Red/Green"},
     lineWidth: 2,
     pointSize: 3,
-    colors: ["#2962FF", "#FF6D00"]
+    colors: ["#26A69A", "#1565C0", "#2962FF", "#FF6D00", "#8E24AA"]
   });
 print(redGreenCompareChart);
 
@@ -302,8 +351,8 @@ var monthlyDiff = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
   mStart = ee.Date(mStart);
   var key = mStart.format("YYYY-MM");
   var monthFc = monthlyLong.filter(ee.Filter.eq("date", key));
-  var up = ee.Feature(monthFc.filter(ee.Filter.eq("reach_type", "upstream")).first());
-  var down = ee.Feature(monthFc.filter(ee.Filter.eq("reach_type", "downstream")).first());
+  var up = ee.Feature(monthFc.filter(ee.Filter.eq("reach_id", "upstream1")).first());
+  var down = ee.Feature(monthFc.filter(ee.Filter.eq("reach_id", "downstream1")).first());
 
   var upTss = ee.Number(up.get("tss_proxy"));
   var downTss = ee.Number(down.get("tss_proxy"));
