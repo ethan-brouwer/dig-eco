@@ -266,7 +266,18 @@ var monthlyStats = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
 
 print("Monthly table", monthlyStats);
 
-var tssChart = ui.Chart.feature.byFeature(monthlyStats, "date", ["tss_proxy"])
+var monthlyStatsForChart = monthlyStats.map(function(f) {
+  var tss = f.get("tss_proxy");
+  var ndti = f.get("ndti");
+  var redGreen = f.get("red_green");
+  return f.set({
+    tss_proxy_chart: ee.Algorithms.If(ee.Algorithms.IsEqual(tss, noDataValue), null, tss),
+    ndti_chart: ee.Algorithms.If(ee.Algorithms.IsEqual(ndti, noDataValue), null, ndti),
+    red_green_chart: ee.Algorithms.If(ee.Algorithms.IsEqual(redGreen, noDataValue), null, redGreen)
+  });
+});
+
+var tssChart = ui.Chart.feature.byFeature(monthlyStatsForChart, "date", ["tss_proxy_chart"])
   .setChartType("LineChart")
   .setOptions({
     title: "Monthly TSS Proxy (SSrivers Corridor)",
@@ -278,7 +289,7 @@ var tssChart = ui.Chart.feature.byFeature(monthlyStats, "date", ["tss_proxy"])
   });
 print(tssChart);
 
-var ndtiChart = ui.Chart.feature.byFeature(monthlyStats, "date", ["ndti"])
+var ndtiChart = ui.Chart.feature.byFeature(monthlyStatsForChart, "date", ["ndti_chart"])
   .setChartType("LineChart")
   .setOptions({
     title: "Monthly NDTI (SSrivers Corridor)",
@@ -290,7 +301,7 @@ var ndtiChart = ui.Chart.feature.byFeature(monthlyStats, "date", ["ndti"])
   });
 print(ndtiChart);
 
-var redGreenChart = ui.Chart.feature.byFeature(monthlyStats, "date", ["red_green"])
+var redGreenChart = ui.Chart.feature.byFeature(monthlyStatsForChart, "date", ["red_green_chart"])
   .setChartType("LineChart")
   .setOptions({
     title: "Monthly Red/Green Ratio (SSrivers Corridor)",
@@ -314,7 +325,12 @@ function buildOverlayTable(valueField, outPrefix) {
       acc = ee.Dictionary(acc);
       var yearKey = ee.String(outPrefix).cat("_").cat(y.format());
       var val = monthFc.filter(ee.Filter.eq("year", y)).aggregate_first(valueField);
-      return acc.set(yearKey, ee.Algorithms.If(ee.Algorithms.IsEqual(val, null), noDataValue, val));
+      var cleanVal = ee.Algorithms.If(
+        ee.Algorithms.IsEqual(val, null),
+        null,
+        ee.Algorithms.If(ee.Number(val).eq(noDataValue), null, val)
+      );
+      return acc.set(yearKey, cleanVal);
     }, ee.Dictionary({})));
 
     return ee.Feature(null, ee.Dictionary({
