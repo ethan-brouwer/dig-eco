@@ -1,0 +1,2 @@
+ .../san_sebastian_ssrivers_monthly_simple.js       | 73 +++++++---------------
+ 1 file changed, 22 insertions(+), 51 deletions(-)

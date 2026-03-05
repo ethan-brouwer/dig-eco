@@ -314,82 +314,53 @@ var redGreenChart = ui.Chart.feature.byFeature(monthlyStatsForChart, "date", ["r
 print(redGreenChart);
 
 // ================= YEAR-OVER-YEAR OVERLAY CHARTS =================
-function buildOverlayTable(valueField, outPrefix) {
-  return ee.FeatureCollection(ee.List.sequence(1, 12).map(function(m) {
-    m = ee.Number(m);
-    var monthFc = monthlyStats.filter(ee.Filter.eq("month_num", m));
-    var monthLabel = ee.Date.fromYMD(2000, m, 1).format("MMM");
+function buildOverlayChartFromLong(valueField, title, yAxisTitle, palette) {
+  var clean = monthlyStatsForChart
+    .filter(ee.Filter.neq(valueField, noDataValue))
+    .filter(ee.Filter.notNull([valueField]))
+    .sort("month_num");
 
-    var valuesByYear = ee.Dictionary(yearsEe.iterate(function(y, acc) {
-      y = ee.Number(y);
-      acc = ee.Dictionary(acc);
-      var yearKey = ee.String(outPrefix).cat("_").cat(y.format());
-      var val = monthFc.filter(ee.Filter.eq("year", y)).aggregate_first(valueField);
-      var cleanVal = ee.Algorithms.If(
-        ee.Algorithms.IsEqual(val, null),
-        null,
-        ee.Algorithms.If(ee.Number(val).eq(noDataValue), null, val)
-      );
-      return acc.set(yearKey, cleanVal);
-    }, ee.Dictionary({})));
-
-    return ee.Feature(null, ee.Dictionary({
-      month_num: m,
-      month_label: monthLabel
-    }).combine(valuesByYear, true));
-  })).sort("month_num");
-}
-
-function buildOverlayChart(table, title, yAxisTitle, prefix, palette) {
-  var seriesKeys = yearsJs.map(function(yv) { return prefix + "_" + yv; });
-  var seriesOptions = {};
-  for (var i = 0; i < seriesKeys.length; i++) {
-    seriesOptions[i] = {color: palette[i % palette.length]};
-  }
-
-  return ui.Chart.feature.byFeature(table, "month_label", seriesKeys)
+  return ui.Chart.feature.groups(clean, "month_num", valueField, "year")
     .setChartType("LineChart")
     .setOptions({
       title: title,
-      hAxis: {title: "Month"},
+      hAxis: {
+        title: "Month",
+        ticks: [
+          {v: 1, f: "Jan"}, {v: 2, f: "Feb"}, {v: 3, f: "Mar"}, {v: 4, f: "Apr"},
+          {v: 5, f: "May"}, {v: 6, f: "Jun"}, {v: 7, f: "Jul"}, {v: 8, f: "Aug"},
+          {v: 9, f: "Sep"}, {v: 10, f: "Oct"}, {v: 11, f: "Nov"}, {v: 12, f: "Dec"}
+        ]
+      },
       vAxis: {title: yAxisTitle},
       lineWidth: 2,
       pointSize: 3,
-      series: seriesOptions
+      colors: palette
     });
 }
 
-var tssOverlayTable = buildOverlayTable("tss_proxy", "tss");
-var ndtiOverlayTable = buildOverlayTable("ndti", "ndti");
-var redGreenOverlayTable = buildOverlayTable("red_green", "rg");
+print("YOY source table", monthlyStatsForChart);
 
-print("TSS YOY table", tssOverlayTable);
-print("NDTI YOY table", ndtiOverlayTable);
-print("Red/Green YOY table", redGreenOverlayTable);
-
-var tssOverlayChart = buildOverlayChart(
-  tssOverlayTable,
+var tssOverlayChart = buildOverlayChartFromLong(
+  "tss_proxy_chart",
   "Year-over-Year TSS Proxy by Month (SSrivers Corridor)",
   "TSS proxy",
-  "tss",
   ["#D84315", "#FB8C00", "#6D4C41", "#BF360C", "#FF7043"]
 );
 print(tssOverlayChart);
 
-var ndtiOverlayChart = buildOverlayChart(
-  ndtiOverlayTable,
+var ndtiOverlayChart = buildOverlayChartFromLong(
+  "ndti_chart",
   "Year-over-Year NDTI by Month (SSrivers Corridor)",
   "NDTI",
-  "ndti",
   ["#8E24AA", "#5E35B1", "#3949AB", "#7B1FA2", "#AB47BC"]
 );
 print(ndtiOverlayChart);
 
-var redGreenOverlayChart = buildOverlayChart(
-  redGreenOverlayTable,
+var redGreenOverlayChart = buildOverlayChartFromLong(
+  "red_green_chart",
   "Year-over-Year Red/Green Ratio by Month (SSrivers Corridor)",
   "Red/Green",
-  "rg",
   ["#2E7D32", "#43A047", "#1B5E20", "#66BB6A", "#81C784"]
 );
 print(redGreenOverlayChart);
