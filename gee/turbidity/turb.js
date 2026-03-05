@@ -56,7 +56,7 @@ function seasonalComposite(year) {
 }
 
 // === Water mask ===
-var jrcWater = ee.Image("JRC/GSW1_4/Occurrence");
+var jrcWater = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select("occurrence");
 var permanentWater = jrcWater.gte(70);
 
 function waterMask(img) {
@@ -144,7 +144,7 @@ Map.addLayer(persistent.selfMask(), {palette: ["FF00FF"]}, "Persistent increases
 // === Optional spatial association (not causal) ===
 // Intersect hotspots with bare soil near rivers as a spatial hint only.
 var bareSoil = ee.Image("ESA/WorldCover/v200/2021").eq(60);
-var riverMask = ee.Image("JRC/GSW1_4/Occurrence").gte(70);
+var riverMask = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select("occurrence").gte(70);
 var nearRiverBare = bareSoil.and(riverMask.focal_max(500));
 var assocMask = persistent.and(nearRiverBare);
 Map.addLayer(assocMask.selfMask(), {palette: ["00FFFF"]}, "Persistent + near river bare soil");
