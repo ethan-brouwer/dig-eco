@@ -11,7 +11,7 @@ var siteName = "San Sebastian Mine (MRDS)";
 var siteLon = -87.93002;
 var siteLat = 13.6509;
 
-var recentMonths = 12;
+var analysisYears = 4;
 var cloudMax = 60;
 var corridorBufferMeters = 50;
 var useWetSeasonFilter = false;
@@ -52,9 +52,17 @@ Map.addLayer(riverCorridor, {color: "FFD54F"}, "SSrivers corridor", true);
 Map.addLayer(aoi, {color: "FFFFFF"}, "AOI", false);
 
 // ================= DATE WINDOW =================
+var currentYear = new Date().getUTCFullYear();
+var startYear = currentYear - (analysisYears - 1);
+var endYear = currentYear;
+var yearsJs = [];
+for (var y = startYear; y <= endYear; y++) yearsJs.push(y);
+var yearsEe = ee.List(yearsJs);
+
 var endDate = ee.Date(Date.now());
-var startDate = endDate.advance(-recentMonths, "month");
-print("Recent window", startDate.format("YYYY-MM-dd"), endDate.format("YYYY-MM-dd"));
+var startDate = ee.Date.fromYMD(startYear, 1, 1);
+print("Analysis window", startDate.format("YYYY-MM-dd"), endDate.format("YYYY-MM-dd"));
+print("Years in overlay", yearsJs);
 print("Corridor buffer (m)", corridorBufferMeters);
 print("Wet season filter", useWetSeasonFilter ? wetSeasonMonths : "OFF");
 print("NDWI threshold", ndwiThreshold);
@@ -178,6 +186,9 @@ var monthlyStats = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
   var emptyFeature = ee.Feature(null, {
     "system:time_start": mStart.millis(),
     date: mStart.format("YYYY-MM"),
+    year: ee.Number.parse(mStart.format("YYYY")),
+    month_num: ee.Number.parse(mStart.format("M")),
+    month_label: mStart.format("MMM"),
     image_count: count,
     water_px: 0,
     qa_flag: "no_images",
@@ -235,6 +246,9 @@ var monthlyStats = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
     return ee.Feature(null, {
       "system:time_start": mStart.millis(),
       date: mStart.format("YYYY-MM"),
+      year: ee.Number.parse(mStart.format("YYYY")),
+      month_num: ee.Number.parse(mStart.format("M")),
+      month_label: mStart.format("MMM"),
       image_count: count,
       water_px: analysisWaterPx,
       month_water_px: monthWaterPx,
@@ -287,3 +301,79 @@ var redGreenChart = ui.Chart.feature.byFeature(monthlyStats, "date", ["red_green
     colors: ["#2E7D32"]
   });
 print(redGreenChart);
+
+// ================= YEAR-OVER-YEAR OVERLAY CHARTS =================
+function buildOverlayTable(valueField, outPrefix) {
+  return ee.FeatureCollection(ee.List.sequence(1, 12).map(function(m) {
+    m = ee.Number(m);
+    var monthFc = monthlyStats.filter(ee.Filter.eq("month_num", m));
+    var monthLabel = ee.Date.fromYMD(2000, m, 1).format("MMM");
+
+    var valuesByYear = ee.Dictionary(yearsEe.iterate(function(y, acc) {
+      y = ee.Number(y);
+      acc = ee.Dictionary(acc);
+      var yearKey = ee.String(outPrefix).cat("_").cat(y.format());
+      var val = monthFc.filter(ee.Filter.eq("year", y)).aggregate_first(valueField);
+      return acc.set(yearKey, ee.Algorithms.If(ee.Algorithms.IsEqual(val, null), noDataValue, val));
+    }, ee.Dictionary({})));
+
+    return ee.Feature(null, ee.Dictionary({
+      month_num: m,
+      month_label: monthLabel
+    }).combine(valuesByYear, true));
+  })).sort("month_num");
+}
+
+function buildOverlayChart(table, title, yAxisTitle, prefix, palette) {
+  var seriesKeys = yearsJs.map(function(yv) { return prefix + "_" + yv; });
+  var seriesOptions = {};
+  for (var i = 0; i < seriesKeys.length; i++) {
+    seriesOptions[i] = {color: palette[i % palette.length]};
+  }
+
+  return ui.Chart.feature.byFeature(table, "month_label", seriesKeys)
+    .setChartType("LineChart")
+    .setOptions({
+      title: title,
+      hAxis: {title: "Month"},
+      vAxis: {title: yAxisTitle},
+      lineWidth: 2,
+      pointSize: 3,
+      series: seriesOptions
+    });
+}
+
+var tssOverlayTable = buildOverlayTable("tss_proxy", "tss");
+var ndtiOverlayTable = buildOverlayTable("ndti", "ndti");
+var redGreenOverlayTable = buildOverlayTable("red_green", "rg");
+
+print("TSS YOY table", tssOverlayTable);
+print("NDTI YOY table", ndtiOverlayTable);
+print("Red/Green YOY table", redGreenOverlayTable);
+
+var tssOverlayChart = buildOverlayChart(
+  tssOverlayTable,
+  "Year-over-Year TSS Proxy by Month (SSrivers Corridor)",
+  "TSS proxy",
+  "tss",
+  ["#D84315", "#FB8C00", "#6D4C41", "#BF360C", "#FF7043"]
+);
+print(tssOverlayChart);
+
+var ndtiOverlayChart = buildOverlayChart(
+  ndtiOverlayTable,
+  "Year-over-Year NDTI by Month (SSrivers Corridor)",
+  "NDTI",
+  "ndti",
+  ["#8E24AA", "#5E35B1", "#3949AB", "#7B1FA2", "#AB47BC"]
+);
+print(ndtiOverlayChart);
+
+var redGreenOverlayChart = buildOverlayChart(
+  redGreenOverlayTable,
+  "Year-over-Year Red/Green Ratio by Month (SSrivers Corridor)",
+  "Red/Green",
+  "rg",
+  ["#2E7D32", "#43A047", "#1B5E20", "#66BB6A", "#81C784"]
+);
+print(redGreenOverlayChart);
