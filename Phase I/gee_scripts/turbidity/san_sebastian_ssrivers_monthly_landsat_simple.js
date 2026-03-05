@@ -1,0 +1,420 @@
+/*
+  FILE: Phase I/gee_scripts/turbidity/san_sebastian_ssrivers_monthly_landsat_simple.js
+  PURPOSE: SSrivers-buffer workflow for water proxy mapping + monthly charts using Landsat.
+
+  REQUIREMENT
+  - In GEE Imports, provide `SSrivers` as a Geometry, Feature, or FeatureCollection.
+*/
+
+// ================= USER SETTINGS =================
+var siteName = "San Sebastian Mine (MRDS)";
+var siteLon = -87.93002;
+var siteLat = 13.6509;
+
+var analysisStartYear = 2010;
+var cloudMax = 60;
+var corridorBufferMeters = 20;
+var useWetSeasonFilter = true;
+var wetSeasonMonths = [5, 6, 7, 8, 9, 10];
+
+// Water mask thresholds (kept aligned with Sentinel script)
+var ndwiThreshold = -0.02;
+var mndwiThreshold = -0.05;
+var minObsCount = 2;
+var minWaterPixelsPerMonth = 2;
+var noDataValue = -9999;
+var useCorridorDirectly = true;
+
+// Landsat native optical scale for SR products.
+var analysisScaleMeters = 30;
+
+// ================= MAP SETUP =================
+Map.setOptions("SATELLITE");
+var sitePoint = ee.Geometry.Point([siteLon, siteLat]);
+Map.centerObject(sitePoint, 12);
+Map.addLayer(sitePoint, {color: "FF0000"}, siteName, true);
+
+// ================= IMPORTED GEOMETRY (SSrivers) =================
+var ssType = ee.String(ee.Algorithms.ObjectType(SSrivers));
+var ssGeom = ee.Geometry(ee.Algorithms.If(
+  ssType.compareTo("FeatureCollection").eq(0),
+  ee.FeatureCollection(SSrivers).geometry(),
+  ee.Algorithms.If(
+    ssType.compareTo("Feature").eq(0),
+    ee.Feature(SSrivers).geometry(),
+    ee.Geometry(SSrivers)
+  )
+));
+
+var riverCorridor = ssGeom.buffer(corridorBufferMeters);
+var aoi = riverCorridor.bounds().buffer(1000);
+var corridorMask = ee.Image.constant(1).clip(riverCorridor).selfMask().rename("CORRIDOR_MASK");
+
+Map.addLayer(ssGeom, {color: "00E5FF"}, "SSrivers line", true);
+Map.addLayer(riverCorridor, {color: "FFD54F"}, "SSrivers corridor", true);
+Map.addLayer(aoi, {color: "FFFFFF"}, "AOI", false);
+
+// ================= DATE WINDOW =================
+var currentYear = new Date().getUTCFullYear();
+var startYear = analysisStartYear;
+var endYear = currentYear;
+var yearsJs = [];
+for (var y = startYear; y <= endYear; y++) yearsJs.push(y);
+
+var endDate = ee.Date(Date.now());
+var startDate = ee.Date.fromYMD(startYear, 1, 1);
+print("Analysis window", startDate.format("YYYY-MM-dd"), endDate.format("YYYY-MM-dd"));
+print("Analysis start year", analysisStartYear);
+print("Years in overlay", yearsJs);
+print("Corridor buffer (m)", corridorBufferMeters);
+print("Wet season filter", useWetSeasonFilter ? wetSeasonMonths : "OFF");
+print("NDWI threshold", ndwiThreshold);
+print("MNDWI threshold", mndwiThreshold);
+print("Min water pixels per month", minWaterPixelsPerMonth);
+print("Use corridor directly for stats", useCorridorDirectly);
+print("Analysis scale (m)", analysisScaleMeters);
+
+// ================= LANDSAT HELPERS =================
+function maskLandsatL2(img) {
+  var qaPixel = img.select("QA_PIXEL");
+  var clear = qaPixel.bitwiseAnd(1 << 0).eq(0) // fill
+    .and(qaPixel.bitwiseAnd(1 << 1).eq(0))     // dilated cloud
+    .and(qaPixel.bitwiseAnd(1 << 2).eq(0))     // cirrus
+    .and(qaPixel.bitwiseAnd(1 << 3).eq(0))     // cloud
+    .and(qaPixel.bitwiseAnd(1 << 4).eq(0))     // cloud shadow
+    .and(qaPixel.bitwiseAnd(1 << 5).eq(0));    // snow
+
+  var radsat = img.select("QA_RADSAT").eq(0);
+  return img.updateMask(clear).updateMask(radsat);
+}
+
+function scaleLandsatSr(img) {
+  var sr = img.select(["SR_B.*"]).multiply(0.0000275).add(-0.2);
+  return img.addBands(sr, null, true);
+}
+
+function renameL57ToCommon(img) {
+  return img.select(
+    ["SR_B1", "SR_B2", "SR_B3", "SR_B4", "SR_B5"],
+    ["B2", "B3", "B4", "B8", "B11"]
+  );
+}
+
+function renameL89ToCommon(img) {
+  return img.select(
+    ["SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6"],
+    ["B2", "B3", "B4", "B8", "B11"]
+  );
+}
+
+function prepL57(img) {
+  var cleaned = scaleLandsatSr(maskLandsatL2(img));
+  return renameL57ToCommon(cleaned)
+    .copyProperties(img, ["system:time_start", "CLOUD_COVER"])
+    .set("sensor", "L57");
+}
+
+function prepL89(img) {
+  var cleaned = scaleLandsatSr(maskLandsatL2(img));
+  return renameL89ToCommon(cleaned)
+    .copyProperties(img, ["system:time_start", "CLOUD_COVER"])
+    .set("sensor", "L89");
+}
+
+function addMonth(img) {
+  return img.set("month", ee.Date(img.get("system:time_start")).get("month"));
+}
+
+function addIndices(img) {
+  var green = img.select("B3");
+  var red = img.select("B4");
+  var ndwi = img.normalizedDifference(["B3", "B8"]).rename("NDWI");
+  var mndwi = img.normalizedDifference(["B3", "B11"]).rename("MNDWI");
+  var ndti = img.normalizedDifference(["B4", "B3"]).rename("NDTI");
+  var tssProxy = red.multiply(1000).rename("TSS_PROXY");
+  var redGreen = red.divide(green).rename("RED_GREEN");
+  return img.addBands([ndwi, mndwi, ndti, tssProxy, redGreen]);
+}
+
+var l5 = ee.ImageCollection("LANDSAT/LT05/C02/T1_L2")
+  .filterBounds(aoi)
+  .filterDate(startDate, endDate)
+  .filter(ee.Filter.lt("CLOUD_COVER", cloudMax))
+  .map(prepL57);
+
+var l7 = ee.ImageCollection("LANDSAT/LE07/C02/T1_L2")
+  .filterBounds(aoi)
+  .filterDate(startDate, endDate)
+  .filter(ee.Filter.lt("CLOUD_COVER", cloudMax))
+  .map(prepL57);
+
+var l8 = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
+  .filterBounds(aoi)
+  .filterDate(startDate, endDate)
+  .filter(ee.Filter.lt("CLOUD_COVER", cloudMax))
+  .map(prepL89);
+
+var l9 = ee.ImageCollection("LANDSAT/LC09/C02/T1_L2")
+  .filterBounds(aoi)
+  .filterDate(startDate, endDate)
+  .filter(ee.Filter.lt("CLOUD_COVER", cloudMax))
+  .map(prepL89);
+
+var ls = l5.merge(l7).merge(l8).merge(l9)
+  .map(addMonth)
+  .map(addIndices)
+  .sort("system:time_start");
+
+if (useWetSeasonFilter) {
+  ls = ls.filter(ee.Filter.inList("month", wetSeasonMonths));
+}
+
+print("Image count", ls.size());
+print("Sensor counts", ls.aggregate_histogram("sensor"));
+
+// ================= CURRENT MAP LAYERS =================
+var recent = ls.median().clip(aoi);
+var obsCount = ls.select("B4").count().clip(aoi).rename("OBS_COUNT");
+var enoughObs = obsCount.gte(minObsCount);
+var analysisAreaMask = corridorMask.updateMask(enoughObs).selfMask().rename("ANALYSIS_AREA_MASK");
+
+var riverMask = recent.select("NDWI").gt(ndwiThreshold)
+  .or(recent.select("MNDWI").gt(mndwiThreshold))
+  .updateMask(enoughObs)
+  .updateMask(corridorMask)
+  .selfMask()
+  .rename("RIVER_MASK");
+
+// Stable fallback mask from the full period, restricted to corridor.
+var referenceRiverMask = riverMask.rename("REFERENCE_RIVER_MASK");
+var currentAnalysisMask = ee.Image(ee.Algorithms.If(useCorridorDirectly, analysisAreaMask, riverMask))
+  .selfMask()
+  .rename("CURRENT_ANALYSIS_MASK");
+
+var tssWater = recent.select("TSS_PROXY").updateMask(currentAnalysisMask).rename("TSS_WATER");
+var ndtiWater = recent.select("NDTI").updateMask(currentAnalysisMask).rename("NDTI_WATER");
+var redGreenWater = recent.select("RED_GREEN").updateMask(currentAnalysisMask).rename("RED_GREEN_WATER");
+
+var waterProxyComposite = ee.Image.cat([
+  recent.select("TSS_PROXY").unitScale(20, 220).clamp(0, 1),
+  recent.select("NDTI").unitScale(-0.1, 0.25).clamp(0, 1),
+  recent.select("RED_GREEN").unitScale(0.7, 2.0).clamp(0, 1)
+]).updateMask(currentAnalysisMask).rename(["TSS_RGB", "NDTI_RGB", "RED_GREEN_RGB"]);
+
+Map.addLayer(recent, {bands: ["B4", "B3", "B2"], min: 0.02, max: 0.30}, "Recent composite (true color)", true);
+Map.addLayer(recent, {bands: ["B8", "B4", "B3"], min: 0.03, max: 0.45}, "Recent composite (false color)", false);
+Map.addLayer(obsCount, {min: 0, max: 30, palette: ["2b2b2b", "f7f7f7", "00ff00"]}, "QA observation count", false);
+Map.addLayer(corridorMask, {palette: ["FFF59D"]}, "Corridor mask", false);
+Map.addLayer(riverMask, {palette: ["FFD54F"]}, "River mask", true);
+Map.addLayer(analysisAreaMask, {palette: ["FFB300"]}, "Analysis area mask (corridor+obs)", false);
+Map.addLayer(currentAnalysisMask, {palette: ["FF6F00"]}, "Current analysis mask", false);
+Map.addLayer(referenceRiverMask, {palette: ["FFB300"]}, "Reference river mask (fallback)", false);
+Map.addLayer(waterProxyComposite, {bands: ["TSS_RGB", "NDTI_RGB", "RED_GREEN_RGB"], min: 0, max: 1}, "Water proxy composite", true);
+Map.addLayer(tssWater, {min: 20, max: 300, palette: ["08306b", "41b6c4", "ffffbf", "fdae61", "d73027"]}, "TSS proxy (water)", false);
+Map.addLayer(ndtiWater, {min: -0.3, max: 0.4, palette: ["2166AC", "F7F7F7", "B2182B"]}, "NDTI (water)", false);
+Map.addLayer(redGreenWater, {min: 0.7, max: 2.0, palette: ["F7FBFF", "FDAE61", "D73027"]}, "Red/Green ratio (water)", false);
+
+// ================= MONTHLY GRAPH OUTPUT =================
+function monthStartList(start, end) {
+  var monthCount = ee.Number(end.difference(start, "month")).floor();
+  return ee.List.sequence(0, monthCount.subtract(1)).map(function(m) {
+    return start.advance(ee.Number(m), "month");
+  });
+}
+
+function safeNumber(x) {
+  return ee.Number(ee.Algorithms.If(ee.Algorithms.IsEqual(x, null), noDataValue, x));
+}
+
+var monthlyStarts = monthStartList(
+  ee.Date(startDate.format("YYYY-MM-01")),
+  ee.Date(endDate.format("YYYY-MM-01")).advance(1, "month")
+);
+
+var monthlyStats = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
+  mStart = ee.Date(mStart);
+  var mEnd = mStart.advance(1, "month");
+  var col = ls.filterDate(mStart, mEnd);
+  var count = col.size();
+
+  var emptyFeature = ee.Feature(null, {
+    "system:time_start": mStart.millis(),
+    date: mStart.format("YYYY-MM"),
+    year: ee.Number.parse(mStart.format("YYYY")),
+    month_num: ee.Number.parse(mStart.format("M")),
+    month_label: mStart.format("MMM"),
+    image_count: count,
+    water_px: 0,
+    qa_flag: "no_images",
+    tss_proxy: noDataValue,
+    ndti: noDataValue,
+    red_green: noDataValue
+  });
+
+  return ee.Feature(ee.Algorithms.If(count.gt(0), (function() {
+    var img = ee.Image(col.median()).clip(aoi);
+    var mObs = col.select("B4").count().clip(aoi);
+    var mMask = img.select("NDWI").gt(ndwiThreshold)
+      .or(img.select("MNDWI").gt(mndwiThreshold))
+      .updateMask(mObs.gte(minObsCount))
+      .updateMask(corridorMask)
+      .selfMask();
+
+    var monthAreaMask = corridorMask.updateMask(mObs.gte(minObsCount)).selfMask();
+
+    var monthWaterPx = safeNumber(mMask.reduceRegion({
+      reducer: ee.Reducer.count(),
+      geometry: riverCorridor,
+      scale: analysisScaleMeters,
+      bestEffort: true,
+      maxPixels: 1e9
+    }).values().get(0));
+
+    var useFallback = monthWaterPx.lt(minWaterPixelsPerMonth);
+    var analysisMask = ee.Image(ee.Algorithms.If(
+      useCorridorDirectly,
+      monthAreaMask,
+      ee.Algorithms.If(useFallback, referenceRiverMask, mMask)
+    ));
+
+    var analysisWaterPx = safeNumber(analysisMask.reduceRegion({
+      reducer: ee.Reducer.count(),
+      geometry: riverCorridor,
+      scale: analysisScaleMeters,
+      bestEffort: true,
+      maxPixels: 1e9
+    }).values().get(0));
+
+    var stats = img.select(["TSS_PROXY", "NDTI", "RED_GREEN"])
+      .updateMask(analysisMask)
+      .reduceRegion({
+        reducer: ee.Reducer.mean(),
+        geometry: riverCorridor,
+        scale: analysisScaleMeters,
+        bestEffort: true,
+        maxPixels: 1e9
+      });
+
+    var enoughWater = analysisWaterPx.gte(minWaterPixelsPerMonth);
+
+    return ee.Feature(null, {
+      "system:time_start": mStart.millis(),
+      date: mStart.format("YYYY-MM"),
+      year: ee.Number.parse(mStart.format("YYYY")),
+      month_num: ee.Number.parse(mStart.format("M")),
+      month_label: mStart.format("MMM"),
+      image_count: count,
+      water_px: analysisWaterPx,
+      month_water_px: monthWaterPx,
+      qa_flag: ee.Algorithms.If(
+        useCorridorDirectly,
+        "corridor_direct",
+        ee.Algorithms.If(useFallback, "fallback_reference_mask", "monthly_mask")
+      ),
+      tss_proxy: ee.Algorithms.If(enoughWater, safeNumber(stats.get("TSS_PROXY")), noDataValue),
+      ndti: ee.Algorithms.If(enoughWater, safeNumber(stats.get("NDTI")), noDataValue),
+      red_green: ee.Algorithms.If(enoughWater, safeNumber(stats.get("RED_GREEN")), noDataValue)
+    });
+  })(), emptyFeature));
+})).sort("system:time_start");
+
+print("Monthly table", monthlyStats);
+
+var monthlyStatsForChart = monthlyStats.map(function(f) {
+  var tss = f.get("tss_proxy");
+  var ndti = f.get("ndti");
+  var redGreen = f.get("red_green");
+  return f.set({
+    tss_proxy_chart: ee.Algorithms.If(ee.Algorithms.IsEqual(tss, noDataValue), null, tss),
+    ndti_chart: ee.Algorithms.If(ee.Algorithms.IsEqual(ndti, noDataValue), null, ndti),
+    red_green_chart: ee.Algorithms.If(ee.Algorithms.IsEqual(redGreen, noDataValue), null, redGreen)
+  });
+});
+
+var tssChart = ui.Chart.feature.byFeature(monthlyStatsForChart, "date", ["tss_proxy_chart"])
+  .setChartType("LineChart")
+  .setOptions({
+    title: "Monthly TSS Proxy (SSrivers Corridor) - Landsat",
+    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
+    vAxis: {title: "TSS proxy"},
+    lineWidth: 2,
+    pointSize: 3,
+    colors: ["#D84315"]
+  });
+print(tssChart);
+
+var ndtiChart = ui.Chart.feature.byFeature(monthlyStatsForChart, "date", ["ndti_chart"])
+  .setChartType("LineChart")
+  .setOptions({
+    title: "Monthly NDTI (SSrivers Corridor) - Landsat",
+    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
+    vAxis: {title: "NDTI"},
+    lineWidth: 2,
+    pointSize: 3,
+    colors: ["#8E24AA"]
+  });
+print(ndtiChart);
+
+var redGreenChart = ui.Chart.feature.byFeature(monthlyStatsForChart, "date", ["red_green_chart"])
+  .setChartType("LineChart")
+  .setOptions({
+    title: "Monthly Red/Green Ratio (SSrivers Corridor) - Landsat",
+    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
+    vAxis: {title: "Red/Green"},
+    lineWidth: 2,
+    pointSize: 3,
+    colors: ["#2E7D32"]
+  });
+print(redGreenChart);
+
+// ================= YEAR-OVER-YEAR OVERLAY CHARTS =================
+function buildOverlayChartFromLong(valueField, title, yAxisTitle, palette) {
+  var clean = monthlyStatsForChart
+    .filter(ee.Filter.neq(valueField, noDataValue))
+    .filter(ee.Filter.notNull([valueField]))
+    .sort("month_num");
+
+  return ui.Chart.feature.groups(clean, "month_num", valueField, "year")
+    .setChartType("LineChart")
+    .setOptions({
+      title: title,
+      hAxis: {
+        title: "Month",
+        ticks: [
+          {v: 1, f: "Jan"}, {v: 2, f: "Feb"}, {v: 3, f: "Mar"}, {v: 4, f: "Apr"},
+          {v: 5, f: "May"}, {v: 6, f: "Jun"}, {v: 7, f: "Jul"}, {v: 8, f: "Aug"},
+          {v: 9, f: "Sep"}, {v: 10, f: "Oct"}, {v: 11, f: "Nov"}, {v: 12, f: "Dec"}
+        ]
+      },
+      vAxis: {title: yAxisTitle},
+      lineWidth: 2,
+      pointSize: 3,
+      colors: palette
+    });
+}
+
+print("YOY source table", monthlyStatsForChart);
+
+var tssOverlayChart = buildOverlayChartFromLong(
+  "tss_proxy_chart",
+  "Year-over-Year TSS Proxy by Month (SSrivers Corridor) - Landsat",
+  "TSS proxy",
+  ["#D84315", "#FB8C00", "#6D4C41", "#BF360C", "#FF7043"]
+);
+print(tssOverlayChart);
+
+var ndtiOverlayChart = buildOverlayChartFromLong(
+  "ndti_chart",
+  "Year-over-Year NDTI by Month (SSrivers Corridor) - Landsat",
+  "NDTI",
+  ["#8E24AA", "#5E35B1", "#3949AB", "#7B1FA2", "#AB47BC"]
+);
+print(ndtiOverlayChart);
+
+var redGreenOverlayChart = buildOverlayChartFromLong(
+  "red_green_chart",
+  "Year-over-Year Red/Green Ratio by Month (SSrivers Corridor) - Landsat",
+  "Red/Green",
+  ["#2E7D32", "#43A047", "#1B5E20", "#66BB6A", "#81C784"]
+);
+print(redGreenOverlayChart);
