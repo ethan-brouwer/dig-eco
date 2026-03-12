@@ -145,35 +145,71 @@ var monthlyNDWI = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
   var col = s2.filterDate(mStart, mEnd);
   var count = col.size();
 
-  var emptyFc = ee.FeatureCollection([]);
+  var emptyFeatures = ee.FeatureCollection([
+    ee.Feature(null, {
+      "system:time_start": mStart.millis(),
+      date: mStart.format("YYYY-MM"),
+      year: ee.Number.parse(mStart.format("YYYY")),
+      month_num: ee.Number.parse(mStart.format("M")),
+      reach_id: "SSrivers",
+      reach_type: "reference",
+      image_count: count,
+      ndwi_mean: noDataValue
+    }),
+    ee.Feature(null, {
+      "system:time_start": mStart.millis(),
+      date: mStart.format("YYYY-MM"),
+      year: ee.Number.parse(mStart.format("YYYY")),
+      month_num: ee.Number.parse(mStart.format("M")),
+      reach_id: "South_River_Full",
+      reach_type: "target",
+      image_count: count,
+      ndwi_mean: noDataValue
+    })
+  ]);
 
   return ee.FeatureCollection(ee.Algorithms.If(count.gt(0), (function() {
     var img = ee.Image(col.median()).select("NDWI");
 
-    var statsFc = img.reduceRegions({
-      collection: comparisonReaches,
-      reducer: ee.Reducer.mean().combine({
-        reducer2: ee.Reducer.median(),
-        sharedInputs: true
-      }),
-      scale: 10,
-      tileScale: 2
+    var ssStats = img.reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: ssRiversCorridor,
+      scale: 20,
+      bestEffort: true,
+      maxPixels: 1e9
     });
 
-    return statsFc.map(function(f) {
-      return ee.Feature(null, {
+    var southStats = img.reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: southRiverFullCorridor,
+      scale: 20,
+      bestEffort: true,
+      maxPixels: 1e9
+    });
+
+    return ee.FeatureCollection([
+      ee.Feature(null, {
         "system:time_start": mStart.millis(),
         date: mStart.format("YYYY-MM"),
         year: ee.Number.parse(mStart.format("YYYY")),
         month_num: ee.Number.parse(mStart.format("M")),
-        reach_id: f.get("reach_id"),
-        reach_type: f.get("reach_type"),
+        reach_id: "SSrivers",
+        reach_type: "reference",
         image_count: count,
-        ndwi_mean: safeNumber(f.get("mean")),
-        ndwi_median: safeNumber(f.get("median"))
-      });
-    });
-  })(), emptyFc));
+        ndwi_mean: safeNumber(ssStats.get("NDWI"))
+      }),
+      ee.Feature(null, {
+        "system:time_start": mStart.millis(),
+        date: mStart.format("YYYY-MM"),
+        year: ee.Number.parse(mStart.format("YYYY")),
+        month_num: ee.Number.parse(mStart.format("M")),
+        reach_id: "South_River_Full",
+        reach_type: "target",
+        image_count: count,
+        ndwi_mean: safeNumber(southStats.get("NDWI"))
+      })
+    ]);
+  })(), emptyFeatures));
 })).flatten().sort("system:time_start");
 
 print("Monthly NDWI table", monthlyNDWI);
@@ -181,10 +217,8 @@ print("Monthly NDWI table", monthlyNDWI);
 // ================= CHARTS =================
 var monthlyNDWIChartFc = monthlyNDWI.map(function(f) {
   var meanVal = f.get("ndwi_mean");
-  var medianVal = f.get("ndwi_median");
   return f.set({
-    ndwi_mean_chart: ee.Algorithms.If(ee.Algorithms.IsEqual(meanVal, noDataValue), null, meanVal),
-    ndwi_median_chart: ee.Algorithms.If(ee.Algorithms.IsEqual(medianVal, noDataValue), null, medianVal)
+    ndwi_mean_chart: ee.Algorithms.If(ee.Algorithms.IsEqual(meanVal, noDataValue), null, meanVal)
   });
 });
 
@@ -203,19 +237,3 @@ var ndwiMeanChart = ui.Chart.feature.groups(
     colors: ["#26A69A", "#E53935"]
   });
 print(ndwiMeanChart);
-
-var ndwiMedianChart = ui.Chart.feature.groups(
-  monthlyNDWIChartFc.filter(ee.Filter.notNull(["ndwi_median_chart"])),
-  "date",
-  "ndwi_median_chart",
-  "reach_id"
-).setChartType("LineChart")
-  .setOptions({
-    title: "Monthly NDWI Median",
-    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
-    vAxis: {title: "NDWI median"},
-    lineWidth: 2,
-    pointSize: 3,
-    colors: ["#26A69A", "#E53935"]
-  });
-print(ndwiMedianChart);
