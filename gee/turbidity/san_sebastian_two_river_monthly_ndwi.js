@@ -42,10 +42,10 @@ var southRiverFullGeom = toGeometry(South_River_Full);
 
 var ssRiversCorridor = ssRiversGeom.buffer(corridorBufferMeters);
 var southRiverFullCorridor = southRiverFullGeom.buffer(corridorBufferMeters);
-
-// Union is only used to limit processing extent.
-var riverMaskGeom = ssRiversCorridor.union(southRiverFullCorridor, 1);
-var aoi = riverMaskGeom.bounds().buffer(500);
+var aoi = ssRiversCorridor
+  .union(southRiverFullCorridor, 1)
+  .bounds()
+  .buffer(500);
 
 var comparisonReaches = ee.FeatureCollection([
   ee.Feature(ssRiversCorridor, {
@@ -103,7 +103,6 @@ function addMonth(img) {
 }
 
 function addIndices(img) {
-  img = img.clip(riverMaskGeom);
   var ndwi = img.normalizedDifference(["B3", "B8"]).rename("NDWI");
   return img.addBands([ndwi]);
 }
@@ -163,7 +162,7 @@ var monthlyNDWI = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
     });
 
     return ee.Feature(ee.Algorithms.If(count.gt(0), (function() {
-      var img = ee.Image(col.median()).clip(rGeom);
+      var img = ee.Image(col.median());
       var stats = img.select("NDWI").reduceRegion({
         reducer: ee.Reducer.mean().combine({
           reducer2: ee.Reducer.median(),
