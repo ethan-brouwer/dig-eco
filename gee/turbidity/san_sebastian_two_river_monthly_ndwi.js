@@ -145,41 +145,35 @@ var monthlyNDWI = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
   var col = s2.filterDate(mStart, mEnd);
   var count = col.size();
 
-  return comparisonReaches.map(function(reach) {
-    reach = ee.Feature(reach);
-    var rGeom = reach.geometry();
+  var emptyFc = ee.FeatureCollection([]);
 
-    var baseFeature = ee.Feature(null, {
-      "system:time_start": mStart.millis(),
-      date: mStart.format("YYYY-MM"),
-      year: ee.Number.parse(mStart.format("YYYY")),
-      month_num: ee.Number.parse(mStart.format("M")),
-      reach_id: reach.get("reach_id"),
-      reach_type: reach.get("reach_type"),
-      image_count: count,
-      ndwi_mean: noDataValue,
-      ndwi_median: noDataValue
+  return ee.FeatureCollection(ee.Algorithms.If(count.gt(0), (function() {
+    var img = ee.Image(col.median()).select("NDWI");
+
+    var statsFc = img.reduceRegions({
+      collection: comparisonReaches,
+      reducer: ee.Reducer.mean().combine({
+        reducer2: ee.Reducer.median(),
+        sharedInputs: true
+      }),
+      scale: 10,
+      tileScale: 2
     });
 
-    return ee.Feature(ee.Algorithms.If(count.gt(0), (function() {
-      var img = ee.Image(col.median());
-      var stats = img.select("NDWI").reduceRegion({
-        reducer: ee.Reducer.mean().combine({
-          reducer2: ee.Reducer.median(),
-          sharedInputs: true
-        }),
-        geometry: rGeom,
-        scale: 10,
-        bestEffort: true,
-        maxPixels: 1e9
+    return statsFc.map(function(f) {
+      return ee.Feature(null, {
+        "system:time_start": mStart.millis(),
+        date: mStart.format("YYYY-MM"),
+        year: ee.Number.parse(mStart.format("YYYY")),
+        month_num: ee.Number.parse(mStart.format("M")),
+        reach_id: f.get("reach_id"),
+        reach_type: f.get("reach_type"),
+        image_count: count,
+        ndwi_mean: safeNumber(f.get("mean")),
+        ndwi_median: safeNumber(f.get("median"))
       });
-
-      return baseFeature.set({
-        ndwi_mean: safeNumber(stats.get("NDWI_mean")),
-        ndwi_median: safeNumber(stats.get("NDWI_median"))
-      });
-    })(), baseFeature));
-  });
+    });
+  })(), emptyFc));
 })).flatten().sort("system:time_start");
 
 print("Monthly NDWI table", monthlyNDWI);
