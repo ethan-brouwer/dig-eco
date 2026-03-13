@@ -1,6 +1,6 @@
 /*
   FILE: gee/turbidity/san_sebastian_two_river_monthly_nsmi.js
-  PURPOSE: Compare monthly NSMI mean for two buffered river corridors.
+  PURPOSE: Compare monthly NSMI mean for two river corridors using a water-only 10 m analysis mask.
 
   GEE IMPORTS REQUIRED
   - impact_point
@@ -15,9 +15,17 @@ var siteLat = 13.646692;
 
 var analysisStartYear = 2017;
 var cloudMax = 60;
-var corridorBufferMeters = 20;
+var displayCorridorBufferMeters = 20;
+var analysisCorridorBufferMeters = 10;
+var analysisScaleMeters = 10;
 var useWetSeasonFilter = false;
 var wetSeasonMonths = [5, 6, 7, 8, 9, 10];
+var ndwiThreshold = 0.0;
+var mndwiThreshold = 0.0;
+var nirWaterMax = 0.12;
+var swirWaterMax = 0.10;
+var minObsCount = 2;
+var minWaterPixelsPerReach = 5;
 var noDataValue = -9999;
 
 // ================= GEOMETRY HELPERS =================
@@ -40,19 +48,21 @@ var impactGeom = toGeometry(impact_point);
 var ssRiversGeom = toGeometry(SSrivers);
 var southRiverFullGeom = toGeometry(South_River_Full);
 
-var ssRiversCorridor = ssRiversGeom.buffer(corridorBufferMeters);
-var southRiverFullCorridor = southRiverFullGeom.buffer(corridorBufferMeters);
-var aoi = ssRiversCorridor
-  .union(southRiverFullCorridor, 1)
+var ssRiversDisplayCorridor = ssRiversGeom.buffer(displayCorridorBufferMeters);
+var southRiverFullDisplayCorridor = southRiverFullGeom.buffer(displayCorridorBufferMeters);
+var ssRiversAnalysisCorridor = ssRiversGeom.buffer(analysisCorridorBufferMeters);
+var southRiverFullAnalysisCorridor = southRiverFullGeom.buffer(analysisCorridorBufferMeters);
+var analysisCorridorsGeom = ssRiversAnalysisCorridor.union(southRiverFullAnalysisCorridor, 1);
+var aoi = analysisCorridorsGeom
   .bounds()
   .buffer(500);
 
 var comparisonReaches = ee.FeatureCollection([
-  ee.Feature(ssRiversCorridor, {
+  ee.Feature(ssRiversAnalysisCorridor, {
     reach_id: "SSrivers",
     reach_type: "reference"
   }),
-  ee.Feature(southRiverFullCorridor, {
+  ee.Feature(southRiverFullAnalysisCorridor, {
     reach_id: "South_River_Full",
     reach_type: "target"
   })
@@ -65,8 +75,10 @@ Map.addLayer(sitePoint, {color: "FF0000"}, siteName, false);
 Map.addLayer(impactGeom, {color: "FFFF00"}, "impact_point", true);
 Map.addLayer(ssRiversGeom, {color: "26A69A"}, "SSrivers line", true);
 Map.addLayer(southRiverFullGeom, {color: "E53935"}, "South_River_Full line", true);
-Map.addLayer(ssRiversCorridor, {color: "26A69A"}, "SSrivers corridor", false);
-Map.addLayer(southRiverFullCorridor, {color: "E53935"}, "South_River_Full corridor", false);
+Map.addLayer(ssRiversDisplayCorridor, {color: "26A69A"}, "SSrivers display corridor", false);
+Map.addLayer(southRiverFullDisplayCorridor, {color: "E53935"}, "South_River_Full display corridor", false);
+Map.addLayer(ssRiversAnalysisCorridor, {color: "00BCD4"}, "SSrivers analysis corridor", false);
+Map.addLayer(southRiverFullAnalysisCorridor, {color: "FF7043"}, "South_River_Full analysis corridor", false);
 Map.addLayer(aoi, {color: "FFFFFF"}, "AOI", false);
 
 // ================= DATE WINDOW =================
@@ -74,8 +86,16 @@ var endDate = ee.Date(Date.now());
 var startDate = ee.Date.fromYMD(analysisStartYear, 1, 1);
 
 print("Analysis window", startDate.format("YYYY-MM-dd"), endDate.format("YYYY-MM-dd"));
-print("Corridor buffer (m)", corridorBufferMeters);
+print("Display corridor buffer (m)", displayCorridorBufferMeters);
+print("Analysis corridor buffer (m)", analysisCorridorBufferMeters);
+print("Analysis scale (m)", analysisScaleMeters);
 print("Wet-season month filter", useWetSeasonFilter ? wetSeasonMonths : "OFF");
+print("NDWI threshold", ndwiThreshold);
+print("MNDWI threshold", mndwiThreshold);
+print("NIR max (dark-water assist)", nirWaterMax);
+print("SWIR1 max (dark-water assist)", swirWaterMax);
+print("Min observations per month", minObsCount);
+print("Min water pixels per reach", minWaterPixelsPerReach);
 
 // ================= S2 HELPERS =================
 function maskS2(img) {
@@ -103,6 +123,8 @@ function addMonth(img) {
 }
 
 function addIndices(img) {
+  var ndwi = img.normalizedDifference(["B3", "B8"]).rename("NDWI");
+  var mndwi = img.normalizedDifference(["B3", "B11"]).rename("MNDWI");
   var nsmi = img.expression(
     "(RED + GREEN - BLUE) / (RED + GREEN + BLUE)",
     {
@@ -111,7 +133,7 @@ function addIndices(img) {
       BLUE: img.select("B2")
     }
   ).rename("NSMI");
-  return img.addBands([nsmi]);
+  return img.addBands([ndwi, mndwi, nsmi]);
 }
 
 var s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
@@ -128,6 +150,23 @@ if (useWetSeasonFilter) {
 }
 
 print("Image count", s2.size());
+
+var analysisCorridorMask = ee.Image.constant(1)
+  .clip(analysisCorridorsGeom)
+  .selfMask()
+  .rename("ANALYSIS_CORRIDOR_MASK");
+
+function waterMask(img) {
+  return img.select("NDWI").gt(ndwiThreshold)
+    .or(img.select("MNDWI").gt(mndwiThreshold))
+    .or(
+      img.select("B8").lt(nirWaterMax)
+        .and(img.select("B11").lt(swirWaterMax))
+    )
+    .updateMask(analysisCorridorMask)
+    .selfMask()
+    .rename("WATER_MASK");
+}
 
 // ================= MONTHLY NSMI COMPARISON =================
 function monthStartList(start, end) {
@@ -161,6 +200,8 @@ var monthlyNSMI = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
       reach_id: "SSrivers",
       reach_type: "reference",
       image_count: count,
+      water_px: 0,
+      qa_flag: "no_images",
       nsmi_mean: noDataValue
     }),
     ee.Feature(null, {
@@ -171,25 +212,49 @@ var monthlyNSMI = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
       reach_id: "South_River_Full",
       reach_type: "target",
       image_count: count,
+      water_px: 0,
+      qa_flag: "no_images",
       nsmi_mean: noDataValue
     })
   ]);
 
   return ee.FeatureCollection(ee.Algorithms.If(count.gt(0), (function() {
-    var img = ee.Image(col.median()).select("NSMI");
+    var img = ee.Image(col.median()).clip(aoi);
+    var monthObs = col.select("B4").count().clip(aoi);
+    var monthWaterMask = waterMask(img)
+      .updateMask(monthObs.gte(minObsCount))
+      .selfMask();
 
-    var ssStats = img.reduceRegion({
+    var ssWaterPx = safeNumber(monthWaterMask.reduceRegion({
+      reducer: ee.Reducer.count(),
+      geometry: ssRiversAnalysisCorridor,
+      scale: analysisScaleMeters,
+      bestEffort: true,
+      maxPixels: 1e9
+    }).values().get(0));
+
+    var southWaterPx = safeNumber(monthWaterMask.reduceRegion({
+      reducer: ee.Reducer.count(),
+      geometry: southRiverFullAnalysisCorridor,
+      scale: analysisScaleMeters,
+      bestEffort: true,
+      maxPixels: 1e9
+    }).values().get(0));
+
+    var waterNsmi = img.select("NSMI").updateMask(monthWaterMask);
+
+    var ssStats = waterNsmi.reduceRegion({
       reducer: ee.Reducer.mean(),
-      geometry: ssRiversCorridor,
-      scale: 20,
+      geometry: ssRiversAnalysisCorridor,
+      scale: analysisScaleMeters,
       bestEffort: true,
       maxPixels: 1e9
     });
 
-    var southStats = img.reduceRegion({
+    var southStats = waterNsmi.reduceRegion({
       reducer: ee.Reducer.mean(),
-      geometry: southRiverFullCorridor,
-      scale: 20,
+      geometry: southRiverFullAnalysisCorridor,
+      scale: analysisScaleMeters,
       bestEffort: true,
       maxPixels: 1e9
     });
@@ -203,7 +268,13 @@ var monthlyNSMI = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
         reach_id: "SSrivers",
         reach_type: "reference",
         image_count: count,
-        nsmi_mean: safeNumber(ssStats.get("NSMI"))
+        water_px: ssWaterPx,
+        qa_flag: ee.Algorithms.If(ssWaterPx.gte(minWaterPixelsPerReach), "water_mask", "low_water_px"),
+        nsmi_mean: ee.Algorithms.If(
+          ssWaterPx.gte(minWaterPixelsPerReach),
+          safeNumber(ssStats.get("NSMI")),
+          noDataValue
+        )
       }),
       ee.Feature(null, {
         "system:time_start": mStart.millis(),
@@ -213,19 +284,28 @@ var monthlyNSMI = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
         reach_id: "South_River_Full",
         reach_type: "target",
         image_count: count,
-        nsmi_mean: safeNumber(southStats.get("NSMI"))
+        water_px: southWaterPx,
+        qa_flag: ee.Algorithms.If(southWaterPx.gte(minWaterPixelsPerReach), "water_mask", "low_water_px"),
+        nsmi_mean: ee.Algorithms.If(
+          southWaterPx.gte(minWaterPixelsPerReach),
+          safeNumber(southStats.get("NSMI")),
+          noDataValue
+        )
       })
     ]);
   })(), emptyFeatures));
 })).flatten().sort("system:time_start");
 
 print("Monthly NSMI table", monthlyNSMI);
+print("Comparison reaches", comparisonReaches);
 
 // ================= CHARTS =================
 var monthlyNSMIChartFc = monthlyNSMI.map(function(f) {
   var meanVal = f.get("nsmi_mean");
+  var waterPx = f.get("water_px");
   return f.set({
-    nsmi_mean_chart: ee.Algorithms.If(ee.Algorithms.IsEqual(meanVal, noDataValue), null, meanVal)
+    nsmi_mean_chart: ee.Algorithms.If(ee.Algorithms.IsEqual(meanVal, noDataValue), null, meanVal),
+    water_px_chart: ee.Algorithms.If(ee.Number(waterPx).gt(0), waterPx, null)
   });
 });
 
@@ -244,3 +324,19 @@ var nsmiMeanChart = ui.Chart.feature.groups(
     colors: ["#26A69A", "#E53935"]
   });
 print(nsmiMeanChart);
+
+var waterPxChart = ui.Chart.feature.groups(
+  monthlyNSMIChartFc.filter(ee.Filter.notNull(["water_px_chart"])),
+  "date",
+  "water_px_chart",
+  "reach_id"
+).setChartType("LineChart")
+  .setOptions({
+    title: "Monthly Water Pixels Used",
+    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
+    vAxis: {title: "Water pixels at 10 m"},
+    lineWidth: 2,
+    pointSize: 3,
+    colors: ["#26A69A", "#E53935"]
+  });
+print(waterPxChart);
