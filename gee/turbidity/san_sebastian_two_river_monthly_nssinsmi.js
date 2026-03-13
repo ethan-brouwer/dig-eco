@@ -1,6 +1,6 @@
 /*
-  FILE: gee/turbidity/san_sebastian_two_river_monthly_ndwi.js
-  PURPOSE: Compare monthly NDWI mean and median for two buffered river corridors.
+  FILE: gee/turbidity/san_sebastian_two_river_monthly_nssinsmi.js
+  PURPOSE: Compare monthly NSSINSMI mean for two buffered river corridors.
 
   GEE IMPORTS REQUIRED
   - impact_point
@@ -103,8 +103,15 @@ function addMonth(img) {
 }
 
 function addIndices(img) {
-  var ndwi = img.normalizedDifference(["B3", "B8"]).rename("NDWI");
-  return img.addBands([ndwi]);
+  var nssinsmi = img.expression(
+    "(RED + GREEN - BLUE) / (RED + GREEN + BLUE)",
+    {
+      RED: img.select("B4"),
+      GREEN: img.select("B3"),
+      BLUE: img.select("B2")
+    }
+  ).rename("NSSINSMI");
+  return img.addBands([nssinsmi]);
 }
 
 var s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
@@ -122,7 +129,7 @@ if (useWetSeasonFilter) {
 
 print("Image count", s2.size());
 
-// ================= MONTHLY NDWI COMPARISON =================
+// ================= MONTHLY NSSINSMI COMPARISON =================
 function monthStartList(start, end) {
   var monthCount = ee.Number(end.difference(start, "month")).floor();
   return ee.List.sequence(0, monthCount.subtract(1)).map(function(m) {
@@ -139,7 +146,7 @@ var monthlyStarts = monthStartList(
   ee.Date(endDate.format("YYYY-MM-01")).advance(1, "month")
 );
 
-var monthlyNDWI = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
+var monthlyNSSINSMI = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
   mStart = ee.Date(mStart);
   var mEnd = mStart.advance(1, "month");
   var col = s2.filterDate(mStart, mEnd);
@@ -154,7 +161,7 @@ var monthlyNDWI = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
       reach_id: "SSrivers",
       reach_type: "reference",
       image_count: count,
-      ndwi_mean: noDataValue
+      nssinsmi_mean: noDataValue
     }),
     ee.Feature(null, {
       "system:time_start": mStart.millis(),
@@ -164,12 +171,12 @@ var monthlyNDWI = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
       reach_id: "South_River_Full",
       reach_type: "target",
       image_count: count,
-      ndwi_mean: noDataValue
+      nssinsmi_mean: noDataValue
     })
   ]);
 
   return ee.FeatureCollection(ee.Algorithms.If(count.gt(0), (function() {
-    var img = ee.Image(col.median()).select("NDWI");
+    var img = ee.Image(col.median()).select("NSSINSMI");
 
     var ssStats = img.reduceRegion({
       reducer: ee.Reducer.mean(),
@@ -196,7 +203,7 @@ var monthlyNDWI = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
         reach_id: "SSrivers",
         reach_type: "reference",
         image_count: count,
-        ndwi_mean: safeNumber(ssStats.get("NDWI"))
+        nssinsmi_mean: safeNumber(ssStats.get("NSSINSMI"))
       }),
       ee.Feature(null, {
         "system:time_start": mStart.millis(),
@@ -206,34 +213,34 @@ var monthlyNDWI = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
         reach_id: "South_River_Full",
         reach_type: "target",
         image_count: count,
-        ndwi_mean: safeNumber(southStats.get("NDWI"))
+        nssinsmi_mean: safeNumber(southStats.get("NSSINSMI"))
       })
     ]);
   })(), emptyFeatures));
 })).flatten().sort("system:time_start");
 
-print("Monthly NDWI table", monthlyNDWI);
+print("Monthly NSSINSMI table", monthlyNSSINSMI);
 
 // ================= CHARTS =================
-var monthlyNDWIChartFc = monthlyNDWI.map(function(f) {
-  var meanVal = f.get("ndwi_mean");
+var monthlyNSSINSMIChartFc = monthlyNSSINSMI.map(function(f) {
+  var meanVal = f.get("nssinsmi_mean");
   return f.set({
-    ndwi_mean_chart: ee.Algorithms.If(ee.Algorithms.IsEqual(meanVal, noDataValue), null, meanVal)
+    nssinsmi_mean_chart: ee.Algorithms.If(ee.Algorithms.IsEqual(meanVal, noDataValue), null, meanVal)
   });
 });
 
-var ndwiMeanChart = ui.Chart.feature.groups(
-  monthlyNDWIChartFc.filter(ee.Filter.notNull(["ndwi_mean_chart"])),
+var nssinsmiMeanChart = ui.Chart.feature.groups(
+  monthlyNSSINSMIChartFc.filter(ee.Filter.notNull(["nssinsmi_mean_chart"])),
   "date",
-  "ndwi_mean_chart",
+  "nssinsmi_mean_chart",
   "reach_id"
 ).setChartType("LineChart")
   .setOptions({
-    title: "Monthly NDWI Mean",
+    title: "Monthly NSSINSMI Mean",
     hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
-    vAxis: {title: "NDWI mean"},
+    vAxis: {title: "NSSINSMI mean"},
     lineWidth: 2,
     pointSize: 3,
     colors: ["#26A69A", "#E53935"]
   });
-print(ndwiMeanChart);
+print(nssinsmiMeanChart);
