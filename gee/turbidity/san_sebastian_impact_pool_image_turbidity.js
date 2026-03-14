@@ -1,9 +1,10 @@
 /*
   FILE: gee/turbidity/san_sebastian_impact_pool_image_turbidity.js
-  PURPOSE: Build lightweight monthly Sentinel-2 water-quality summaries for the impact_pool polygon.
+  PURPOSE: Build lightweight monthly Sentinel-2 water-quality summaries for the impact_pool and upstream_control polygons.
 
   GEE IMPORTS REQUIRED
   - impact_pool
+  - upstream_control
 */
 
 // ================= USER SETTINGS =================
@@ -51,19 +52,32 @@ function monthStartList(start, end) {
 }
 
 var impactPoolGeom = toGeometry(impact_pool);
-var aoi = impactPoolGeom;
+var upstreamControlGeom = toGeometry(upstream_control);
+var aoi = impactPoolGeom.union(upstreamControlGeom, 1);
+
+var comparisonAreas = ee.FeatureCollection([
+  ee.Feature(impactPoolGeom, {
+    reach_id: "impact_pool",
+    reach_type: "impact"
+  }),
+  ee.Feature(upstreamControlGeom, {
+    reach_id: "upstream_control",
+    reach_type: "control"
+  })
+]);
 
 // ================= MAP SETUP =================
 Map.setOptions("SATELLITE");
 Map.centerObject(impactPoolGeom, 16);
 Map.addLayer(impactPoolGeom, {color: "FFFF00"}, "impact_pool", true);
+Map.addLayer(upstreamControlGeom, {color: "26A69A"}, "upstream_control", true);
 
 // ================= DATE WINDOW =================
 var endDate = ee.Date(Date.now());
 var startDate = ee.Date.fromYMD(analysisStartYear, 1, 1);
 
 print("Analysis window", startDate.format("YYYY-MM-dd"), endDate.format("YYYY-MM-dd"));
-print("Collection filter geometry", "impact_pool only");
+print("Collection filter geometry", "impact_pool + upstream_control");
 print("Scale (m)", analysisScaleMeters);
 print("Wet-season month filter", useWetSeasonFilter ? wetSeasonMonths : "OFF");
 print("NDWI threshold", ndwiThreshold);
@@ -74,6 +88,7 @@ print("EGRI formula", "Green / Red");
 print("NIR max", nirWaterMax);
 print("SWIR1 max", swirWaterMax);
 print("Min water pixels", minWaterPixels);
+print("Comparison areas", comparisonAreas);
 
 // ================= S2 HELPERS =================
 function maskS2(img) {
@@ -173,77 +188,95 @@ var monthlyStats = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
   var col = s2.filterDate(mStart, mEnd);
   var imageCount = col.size();
 
-  var emptyFeature = ee.Feature(null, {
-    "system:time_start": mStart.millis(),
-    date: mStart.format("YYYY-MM"),
-    year: ee.Number.parse(mStart.format("YYYY")),
-    year_label: mStart.format("YYYY"),
-    month_num: ee.Number.parse(mStart.format("M")),
-    month_label: mStart.format("MMM"),
-    image_count: imageCount,
-    water_px: 0,
-    qa_flag: "no_images",
-    ndwi_mean: noDataValue,
-    mndwi_mean: noDataValue,
-    ndmi_mean: noDataValue,
-    nsmi_mean: noDataValue,
-    ndssi_mean: noDataValue,
-    egri_mean: noDataValue
-  });
+  var monthImg = ee.Image(ee.Algorithms.If(
+    imageCount.gt(0),
+    col.median().clip(aoi),
+    ee.Image.constant([0, 0, 0, 0, 0, 0]).rename(["NDWI", "MNDWI", "NDMI", "NSMI", "NDSSI", "EGRI"]).selfMask()
+  ));
 
-  return ee.Feature(ee.Algorithms.If(imageCount.gt(0), (function() {
-    var monthImg = ee.Image(col.median()).clip(impactPoolGeom);
-    var water = waterMask(monthImg).clip(impactPoolGeom);
+  var monthlyFeatures = comparisonAreas.map(function(area) {
+    area = ee.Feature(area);
+    var areaGeom = area.geometry();
+    var reachId = area.get("reach_id");
+    var reachType = area.get("reach_type");
 
-    var waterPx = safeNumber(water.reduceRegion({
-      reducer: ee.Reducer.count(),
-      geometry: impactPoolGeom,
-      scale: analysisScaleMeters,
-      bestEffort: true,
-      maxPixels: 1e8
-    }).get("WATER_MASK"));
-
-    var stats = monthImg
-      .select(["NDWI", "MNDWI", "NDMI", "NSMI", "NDSSI", "EGRI"])
-      .updateMask(water)
-      .reduceRegion({
-        reducer: ee.Reducer.mean(),
-        geometry: impactPoolGeom,
-        scale: analysisScaleMeters,
-        bestEffort: true,
-        maxPixels: 1e8
-      });
-
-    var isValid = waterPx.gte(minWaterPixels);
-
-    return ee.Feature(null, {
+    var emptyFeature = ee.Feature(null, {
       "system:time_start": mStart.millis(),
       date: mStart.format("YYYY-MM"),
       year: ee.Number.parse(mStart.format("YYYY")),
       year_label: mStart.format("YYYY"),
       month_num: ee.Number.parse(mStart.format("M")),
       month_label: mStart.format("MMM"),
+      reach_id: reachId,
+      reach_type: reachType,
       image_count: imageCount,
-      water_px: waterPx,
-      qa_flag: ee.Algorithms.If(isValid, "monthly_average", "low_water_px"),
-      ndwi_mean: ee.Algorithms.If(isValid, safeNumber(stats.get("NDWI")), noDataValue),
-      mndwi_mean: ee.Algorithms.If(isValid, safeNumber(stats.get("MNDWI")), noDataValue),
-      ndmi_mean: ee.Algorithms.If(isValid, safeNumber(stats.get("NDMI")), noDataValue),
-      nsmi_mean: ee.Algorithms.If(isValid, safeNumber(stats.get("NSMI")), noDataValue),
-      ndssi_mean: ee.Algorithms.If(isValid, safeNumber(stats.get("NDSSI")), noDataValue),
-      egri_mean: ee.Algorithms.If(isValid, safeNumber(stats.get("EGRI")), noDataValue)
+      water_px: 0,
+      qa_flag: "no_images",
+      ndwi_mean: noDataValue,
+      mndwi_mean: noDataValue,
+      ndmi_mean: noDataValue,
+      nsmi_mean: noDataValue,
+      ndssi_mean: noDataValue,
+      egri_mean: noDataValue
     });
-  })(), emptyFeature));
-})).sort("system:time_start");
+
+    return ee.Feature(ee.Algorithms.If(imageCount.gt(0), (function() {
+      var water = waterMask(monthImg).clip(areaGeom);
+
+      var waterPx = safeNumber(water.reduceRegion({
+        reducer: ee.Reducer.count(),
+        geometry: areaGeom,
+        scale: analysisScaleMeters,
+        bestEffort: true,
+        maxPixels: 1e8
+      }).get("WATER_MASK"));
+
+      var stats = monthImg
+        .select(["NDWI", "MNDWI", "NDMI", "NSMI", "NDSSI", "EGRI"])
+        .updateMask(water)
+        .reduceRegion({
+          reducer: ee.Reducer.mean(),
+          geometry: areaGeom,
+          scale: analysisScaleMeters,
+          bestEffort: true,
+          maxPixels: 1e8
+        });
+
+      var isValid = waterPx.gte(minWaterPixels);
+
+      return ee.Feature(null, {
+        "system:time_start": mStart.millis(),
+        date: mStart.format("YYYY-MM"),
+        year: ee.Number.parse(mStart.format("YYYY")),
+        year_label: mStart.format("YYYY"),
+        month_num: ee.Number.parse(mStart.format("M")),
+        month_label: mStart.format("MMM"),
+        reach_id: reachId,
+        reach_type: reachType,
+        image_count: imageCount,
+        water_px: waterPx,
+        qa_flag: ee.Algorithms.If(isValid, "monthly_average", "low_water_px"),
+        ndwi_mean: ee.Algorithms.If(isValid, safeNumber(stats.get("NDWI")), noDataValue),
+        mndwi_mean: ee.Algorithms.If(isValid, safeNumber(stats.get("MNDWI")), noDataValue),
+        ndmi_mean: ee.Algorithms.If(isValid, safeNumber(stats.get("NDMI")), noDataValue),
+        nsmi_mean: ee.Algorithms.If(isValid, safeNumber(stats.get("NSMI")), noDataValue),
+        ndssi_mean: ee.Algorithms.If(isValid, safeNumber(stats.get("NDSSI")), noDataValue),
+        egri_mean: ee.Algorithms.If(isValid, safeNumber(stats.get("EGRI")), noDataValue)
+      });
+    })(), emptyFeature));
+  });
+
+  return monthlyFeatures;
+})).flatten().sort("system:time_start");
 
 print("Monthly turbidity table", monthlyStats);
 
 var validMonthlyStats = monthlyStats.filter(ee.Filter.eq("qa_flag", "monthly_average"));
 print("Valid month count", validMonthlyStats.size());
 
-var highNsmiMonths = validMonthlyStats.sort("nsmi_mean", false).limit(15);
-var lowNdwiMonths = validMonthlyStats.sort("ndwi_mean", true).limit(15);
-var highNdssiMonths = validMonthlyStats.sort("ndssi_mean", false).limit(15);
+var highNsmiMonths = validMonthlyStats.sort("nsmi_mean", false).limit(20);
+var lowNdwiMonths = validMonthlyStats.sort("ndwi_mean", true).limit(20);
+var highNdssiMonths = validMonthlyStats.sort("ndssi_mean", false).limit(20);
 
 print("Highest NSMI months", highNsmiMonths);
 print("Lowest NDWI months", lowNdwiMonths);
@@ -262,39 +295,105 @@ var monthlyChartFc = monthlyStats.map(function(f) {
   });
 });
 
-var monthlyWaterChart = ui.Chart.feature.byFeature(
+var monthlyWaterChart = ui.Chart.feature.groups(
   monthlyChartFc.filter(ee.Filter.notNull(["ndwi_mean_chart"])),
   "date",
-  ["ndwi_mean_chart", "mndwi_mean_chart", "ndmi_mean_chart"]
+  "ndwi_mean_chart",
+  "reach_id"
 ).setChartType("LineChart")
   .setOptions({
-    title: "Monthly Water Presence Indices",
+    title: "Monthly NDWI Comparison",
     hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
-    vAxis: {title: "Index value"},
+    vAxis: {title: "NDWI"},
     lineWidth: 2,
     pointSize: 3,
-    colors: ["#1E88E5", "#43A047", "#3949AB"]
+    colors: ["#E53935", "#26A69A"]
   });
 print(monthlyWaterChart);
 
-var monthlySedimentChart = ui.Chart.feature.byFeature(
-  monthlyChartFc.filter(ee.Filter.notNull(["nsmi_mean_chart"])),
+var monthlyMndwiChart = ui.Chart.feature.groups(
+  monthlyChartFc.filter(ee.Filter.notNull(["mndwi_mean_chart"])),
   "date",
-  ["nsmi_mean_chart", "ndssi_mean_chart", "egri_mean_chart"]
+  "mndwi_mean_chart",
+  "reach_id"
 ).setChartType("LineChart")
   .setOptions({
-    title: "Monthly Suspended Material Indices",
+    title: "Monthly MNDWI Comparison",
     hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
-    vAxis: {title: "Index value"},
+    vAxis: {title: "MNDWI"},
     lineWidth: 2,
     pointSize: 3,
-    colors: ["#E53935", "#FB8C00", "#8E24AA"]
+    colors: ["#E53935", "#26A69A"]
   });
-print(monthlySedimentChart);
+print(monthlyMndwiChart);
 
-function makeYearOverlayChart(propertyName, title, axisTitle) {
+var monthlyNdmiChart = ui.Chart.feature.groups(
+  monthlyChartFc.filter(ee.Filter.notNull(["ndmi_mean_chart"])),
+  "date",
+  "ndmi_mean_chart",
+  "reach_id"
+).setChartType("LineChart")
+  .setOptions({
+    title: "Monthly NDMI Comparison",
+    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
+    vAxis: {title: "NDMI"},
+    lineWidth: 2,
+    pointSize: 3,
+    colors: ["#E53935", "#26A69A"]
+  });
+print(monthlyNdmiChart);
+
+var monthlyNsmiChart = ui.Chart.feature.groups(
+  monthlyChartFc.filter(ee.Filter.notNull(["nsmi_mean_chart"])),
+  "date",
+  "nsmi_mean_chart",
+  "reach_id"
+).setChartType("LineChart")
+  .setOptions({
+    title: "Monthly NSMI Comparison",
+    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
+    vAxis: {title: "NSMI"},
+    lineWidth: 2,
+    pointSize: 3,
+    colors: ["#E53935", "#26A69A"]
+  });
+print(monthlyNsmiChart);
+
+var monthlyNdssiChart = ui.Chart.feature.groups(
+  monthlyChartFc.filter(ee.Filter.notNull(["ndssi_mean_chart"])),
+  "date",
+  "ndssi_mean_chart",
+  "reach_id"
+).setChartType("LineChart")
+  .setOptions({
+    title: "Monthly NDSSI Comparison",
+    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
+    vAxis: {title: "NDSSI"},
+    lineWidth: 2,
+    pointSize: 3,
+    colors: ["#E53935", "#26A69A"]
+  });
+print(monthlyNdssiChart);
+
+var monthlyEgriChart = ui.Chart.feature.groups(
+  monthlyChartFc.filter(ee.Filter.notNull(["egri_mean_chart"])),
+  "date",
+  "egri_mean_chart",
+  "reach_id"
+).setChartType("LineChart")
+  .setOptions({
+    title: "Monthly EGRI Comparison",
+    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
+    vAxis: {title: "EGRI"},
+    lineWidth: 2,
+    pointSize: 3,
+    colors: ["#E53935", "#26A69A"]
+  });
+print(monthlyEgriChart);
+
+function makeYearOverlayChart(fc, propertyName, title, axisTitle) {
   return ui.Chart.feature.groups(
-    monthlyChartFc.filter(ee.Filter.notNull([propertyName])),
+    fc.filter(ee.Filter.notNull([propertyName])),
     "month_num",
     propertyName,
     "year_label"
@@ -311,24 +410,27 @@ function makeYearOverlayChart(propertyName, title, axisTitle) {
     });
 }
 
-print(makeYearOverlayChart("ndwi_mean_chart", "NDWI Monthly Seasonality by Year", "NDWI monthly mean"));
-print(makeYearOverlayChart("mndwi_mean_chart", "MNDWI Monthly Seasonality by Year", "MNDWI monthly mean"));
-print(makeYearOverlayChart("ndmi_mean_chart", "NDMI Monthly Seasonality by Year", "NDMI monthly mean"));
-print(makeYearOverlayChart("nsmi_mean_chart", "NSMI Monthly Seasonality by Year", "NSMI monthly mean"));
-print(makeYearOverlayChart("ndssi_mean_chart", "NDSSI Monthly Seasonality by Year", "NDSSI monthly mean"));
-print(makeYearOverlayChart("egri_mean_chart", "EGRI Monthly Seasonality by Year", "EGRI monthly mean"));
+var impactChartFc = monthlyChartFc.filter(ee.Filter.eq("reach_id", "impact_pool"));
+var controlChartFc = monthlyChartFc.filter(ee.Filter.eq("reach_id", "upstream_control"));
 
-var waterPxChart = ui.Chart.feature.byFeature(
+print(makeYearOverlayChart(impactChartFc, "ndwi_mean_chart", "Impact Pool NDWI Monthly Seasonality by Year", "NDWI monthly mean"));
+print(makeYearOverlayChart(controlChartFc, "ndwi_mean_chart", "Upstream Control NDWI Monthly Seasonality by Year", "NDWI monthly mean"));
+print(makeYearOverlayChart(impactChartFc, "nsmi_mean_chart", "Impact Pool NSMI Monthly Seasonality by Year", "NSMI monthly mean"));
+print(makeYearOverlayChart(controlChartFc, "nsmi_mean_chart", "Upstream Control NSMI Monthly Seasonality by Year", "NSMI monthly mean"));
+print(makeYearOverlayChart(impactChartFc, "ndssi_mean_chart", "Impact Pool NDSSI Monthly Seasonality by Year", "NDSSI monthly mean"));
+print(makeYearOverlayChart(controlChartFc, "ndssi_mean_chart", "Upstream Control NDSSI Monthly Seasonality by Year", "NDSSI monthly mean"));
+
+var waterPxChart = ui.Chart.feature.groups(
   monthlyChartFc.filter(ee.Filter.notNull(["water_px_chart"])),
   "date",
-  ["water_px_chart"]
+  "water_px_chart",
+  "reach_id"
 ).setChartType("ColumnChart")
   .setOptions({
     title: "Monthly Water Pixels Used",
     hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
     vAxis: {title: "Water pixels at 10 m"},
-    legend: {position: "none"},
-    colors: ["#26A69A"]
+    colors: ["#E53935", "#26A69A"]
   });
 print(waterPxChart);
 
@@ -339,7 +441,7 @@ var latestPreview = ee.Image(ee.Algorithms.If(
   latestMonthCol.size().gt(0),
   latestMonthCol.median(),
   s2.sort("system:time_start", false).first()
-)).clip(impactPoolGeom);
+)).clip(aoi);
 
 Map.addLayer(
   latestPreview.select(["B4", "B3", "B2"]),
