@@ -1,6 +1,6 @@
 /*
   FILE: gee/turbidity/san_sebastian_impact_pool_image_turbidity.js
-  PURPOSE: Build a per-image Sentinel-2 turbidity time series for the impact_pool polygon.
+  PURPOSE: Build monthly Sentinel-2 water-quality summaries for the impact_pool polygon.
 
   GEE IMPORTS REQUIRED
   - impact_pool
@@ -56,6 +56,7 @@ print("Scale (m)", analysisScaleMeters);
 print("Wet-season month filter", useWetSeasonFilter ? wetSeasonMonths : "OFF");
 print("NDWI threshold", ndwiThreshold);
 print("MNDWI threshold", mndwiThreshold);
+print("NDMI formula", "(Green - NIR) / (Green + NIR)");
 print("NIR max", nirWaterMax);
 print("SWIR1 max", swirWaterMax);
 print("Min water pixels", minWaterPixels);
@@ -88,6 +89,7 @@ function addMonth(img) {
 function addIndices(img) {
   var ndwi = img.normalizedDifference(["B3", "B8"]).rename("NDWI");
   var mndwi = img.normalizedDifference(["B3", "B11"]).rename("MNDWI");
+  var ndmi = img.normalizedDifference(["B3", "B8"]).rename("NDMI");
   var nsmi = img.expression(
     "(RED + GREEN - BLUE) / (RED + GREEN + BLUE)",
     {
@@ -96,7 +98,21 @@ function addIndices(img) {
       BLUE: img.select("B2")
     }
   ).rename("NSMI");
-  return img.addBands([ndwi, mndwi, nsmi]);
+  var ndssi = img.expression(
+    "(BLUE - NIR) / (BLUE + NIR)",
+    {
+      BLUE: img.select("B2"),
+      NIR: img.select("B8")
+    }
+  ).rename("NDSSI");
+  var egri = img.expression(
+    "GREEN / RED",
+    {
+      GREEN: img.select("B3"),
+      RED: img.select("B4").max(0.0001)
+    }
+  ).rename("EGRI");
+  return img.addBands([ndwi, mndwi, ndmi, nsmi, ndssi, egri]);
 }
 
 function waterMask(img) {
@@ -125,7 +141,7 @@ if (useWetSeasonFilter) {
 
 print("Raw image count", s2.size());
 
-// ================= PER-IMAGE TIME SERIES =================
+// ================= PER-IMAGE SCORING =================
 var scoredS2 = s2.map(function(img) {
   var date = ee.Date(img.get("system:time_start"));
   var water = waterMask(img).clip(impactPoolGeom);
@@ -147,7 +163,7 @@ var scoredS2 = s2.map(function(img) {
     maxPixels: 1e9
   }).get("WATER_MASK"));
 
-  var waterOnly = img.select(["NDWI", "MNDWI", "NSMI"]).updateMask(water);
+  var waterOnly = img.select(["NDWI", "MNDWI", "NDMI", "NSMI", "NDSSI", "EGRI"]).updateMask(water);
   var stats = waterOnly.reduceRegion({
     reducer: ee.Reducer.mean()
       .combine({reducer2: ee.Reducer.median(), sharedInputs: true})
@@ -176,9 +192,18 @@ var scoredS2 = s2.map(function(img) {
     mndwi_mean: ee.Algorithms.If(isValid, safeNumber(stats.get("MNDWI_mean")), noDataValue),
     mndwi_median: ee.Algorithms.If(isValid, safeNumber(stats.get("MNDWI_median")), noDataValue),
     mndwi_stddev: ee.Algorithms.If(isValid, safeNumber(stats.get("MNDWI_stdDev")), noDataValue),
+    ndmi_mean: ee.Algorithms.If(isValid, safeNumber(stats.get("NDMI_mean")), noDataValue),
+    ndmi_median: ee.Algorithms.If(isValid, safeNumber(stats.get("NDMI_median")), noDataValue),
+    ndmi_stddev: ee.Algorithms.If(isValid, safeNumber(stats.get("NDMI_stdDev")), noDataValue),
     nsmi_mean: ee.Algorithms.If(isValid, safeNumber(stats.get("NSMI_mean")), noDataValue),
     nsmi_median: ee.Algorithms.If(isValid, safeNumber(stats.get("NSMI_median")), noDataValue),
-    nsmi_stddev: ee.Algorithms.If(isValid, safeNumber(stats.get("NSMI_stdDev")), noDataValue)
+    nsmi_stddev: ee.Algorithms.If(isValid, safeNumber(stats.get("NSMI_stdDev")), noDataValue),
+    ndssi_mean: ee.Algorithms.If(isValid, safeNumber(stats.get("NDSSI_mean")), noDataValue),
+    ndssi_median: ee.Algorithms.If(isValid, safeNumber(stats.get("NDSSI_median")), noDataValue),
+    ndssi_stddev: ee.Algorithms.If(isValid, safeNumber(stats.get("NDSSI_stdDev")), noDataValue),
+    egri_mean: ee.Algorithms.If(isValid, safeNumber(stats.get("EGRI_mean")), noDataValue),
+    egri_median: ee.Algorithms.If(isValid, safeNumber(stats.get("EGRI_median")), noDataValue),
+    egri_stddev: ee.Algorithms.If(isValid, safeNumber(stats.get("EGRI_stdDev")), noDataValue)
   });
 });
 
@@ -202,9 +227,18 @@ var imageStats = ee.FeatureCollection(scoredS2.map(function(img) {
     "mndwi_mean",
     "mndwi_median",
     "mndwi_stddev",
+    "ndmi_mean",
+    "ndmi_median",
+    "ndmi_stddev",
     "nsmi_mean",
     "nsmi_median",
-    "nsmi_stddev"
+    "nsmi_stddev",
+    "ndssi_mean",
+    "ndssi_median",
+    "ndssi_stddev",
+    "egri_mean",
+    "egri_median",
+    "egri_stddev"
   ]));
 })).sort("system:time_start");
 
@@ -213,16 +247,73 @@ var validImageStats = imageStats.filter(ee.Filter.eq("qa_flag", "water_mask"));
 print("Per-image turbidity table", imageStats);
 print("Valid image count", validImageStats.size());
 
-var highNsmiEvents = validImageStats.sort("nsmi_mean", false).limit(15);
-var lowNdwiEvents = validImageStats.sort("ndwi_mean", true).limit(15);
-var lowMndwiEvents = validImageStats.sort("mndwi_mean", true).limit(15);
+// ================= MONTHLY AGGREGATION =================
+function monthStartList(start, end) {
+  var monthCount = ee.Number(end.difference(start, "month")).floor();
+  return ee.List.sequence(0, monthCount.subtract(1)).map(function(m) {
+    return start.advance(ee.Number(m), "month");
+  });
+}
 
-print("Highest NSMI images", highNsmiEvents);
-print("Lowest NDWI images", lowNdwiEvents);
-print("Lowest MNDWI images", lowMndwiEvents);
+function aggregateMean(fc, propertyName) {
+  return ee.Number(ee.Algorithms.If(
+    ee.FeatureCollection(fc).size().gt(0),
+    ee.FeatureCollection(fc).aggregate_mean(propertyName),
+    noDataValue
+  ));
+}
+
+var monthlyStarts = monthStartList(
+  ee.Date(startDate.format("YYYY-MM-01")),
+  ee.Date(endDate.format("YYYY-MM-01")).advance(1, "month")
+);
+
+var monthlyStats = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
+  mStart = ee.Date(mStart);
+  var mEnd = mStart.advance(1, "month");
+  var rawMonth = imageStats.filterDate(mStart, mEnd);
+  var validMonth = validImageStats.filterDate(mStart, mEnd);
+  var validCount = validMonth.size();
+  var dateLabel = mStart.format("YYYY-MM");
+
+  return ee.Feature(null, {
+    "system:time_start": mStart.millis(),
+    date: dateLabel,
+    year: ee.Number.parse(mStart.format("YYYY")),
+    year_label: mStart.format("YYYY"),
+    month_num: ee.Number.parse(mStart.format("M")),
+    month_label: mStart.format("MMM"),
+    image_count: rawMonth.size(),
+    valid_image_count: validCount,
+    water_px_mean: aggregateMean(validMonth, "water_px"),
+    ndwi_mean: aggregateMean(validMonth, "ndwi_mean"),
+    mndwi_mean: aggregateMean(validMonth, "mndwi_mean"),
+    ndmi_mean: aggregateMean(validMonth, "ndmi_mean"),
+    nsmi_mean: aggregateMean(validMonth, "nsmi_mean"),
+    ndssi_mean: aggregateMean(validMonth, "ndssi_mean"),
+    egri_mean: aggregateMean(validMonth, "egri_mean"),
+    qa_flag: ee.Algorithms.If(validCount.gt(0), "monthly_average", "no_valid_images")
+  });
+})).sort("system:time_start");
+
+print("Monthly turbidity table", monthlyStats);
+
+var highNsmiMonths = monthlyStats.filter(ee.Filter.eq("qa_flag", "monthly_average"))
+  .sort("nsmi_mean", false)
+  .limit(15);
+var lowNdwiMonths = monthlyStats.filter(ee.Filter.eq("qa_flag", "monthly_average"))
+  .sort("ndwi_mean", true)
+  .limit(15);
+var lowNdssiMonths = monthlyStats.filter(ee.Filter.eq("qa_flag", "monthly_average"))
+  .sort("ndssi_mean", true)
+  .limit(15);
+
+print("Highest NSMI months", highNsmiMonths);
+print("Lowest NDWI months", lowNdwiMonths);
+print("Lowest NDSSI months", lowNdssiMonths);
 
 // ================= CHARTS =================
-var chartFc = imageStats.map(function(f) {
+var monthlyChartFc = monthlyStats.map(function(f) {
   function cleanValue(name) {
     var value = f.get(name);
     return ee.Algorithms.If(ee.Algorithms.IsEqual(value, noDataValue), null, value);
@@ -231,50 +322,128 @@ var chartFc = imageStats.map(function(f) {
   return f.set({
     ndwi_mean_chart: cleanValue("ndwi_mean"),
     mndwi_mean_chart: cleanValue("mndwi_mean"),
+    ndmi_mean_chart: cleanValue("ndmi_mean"),
     nsmi_mean_chart: cleanValue("nsmi_mean"),
-    water_px_chart: ee.Algorithms.If(ee.Number(f.get("water_px")).gt(0), f.get("water_px"), null)
+    ndssi_mean_chart: cleanValue("ndssi_mean"),
+    egri_mean_chart: cleanValue("egri_mean"),
+    water_px_mean_chart: cleanValue("water_px_mean")
   });
 });
 
-var ndwiChart = ui.Chart.feature.byFeature(
-  chartFc.filter(ee.Filter.notNull(["ndwi_mean_chart"])),
+var monthlySignalChart = ui.Chart.feature.byFeature(
+  monthlyChartFc.filter(ee.Filter.notNull(["ndwi_mean_chart"])),
   "date",
-  ["ndwi_mean_chart", "mndwi_mean_chart"]
+  ["ndwi_mean_chart", "mndwi_mean_chart", "ndmi_mean_chart"]
 ).setChartType("LineChart")
   .setOptions({
-    title: "Impact Pool Water Signal: NDWI and MNDWI",
-    hAxis: {title: "Image date", slantedText: true, slantedTextAngle: 45},
+    title: "Monthly Water Presence Indices",
+    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
     vAxis: {title: "Index value"},
     lineWidth: 2,
     pointSize: 3,
-    colors: ["#1E88E5", "#43A047"]
+    colors: ["#1E88E5", "#43A047", "#3949AB"]
   });
-print(ndwiChart);
+print(monthlySignalChart);
 
-var nsmiChart = ui.Chart.feature.byFeature(
-  chartFc.filter(ee.Filter.notNull(["nsmi_mean_chart"])),
+var monthlySedimentChart = ui.Chart.feature.byFeature(
+  monthlyChartFc.filter(ee.Filter.notNull(["nsmi_mean_chart"])),
   "date",
-  ["nsmi_mean_chart"]
+  ["nsmi_mean_chart", "ndssi_mean_chart", "egri_mean_chart"]
 ).setChartType("LineChart")
   .setOptions({
-    title: "Impact Pool Water Signal: NSMI",
-    hAxis: {title: "Image date", slantedText: true, slantedTextAngle: 45},
-    vAxis: {title: "NSMI mean"},
+    title: "Monthly Suspended Material Indices",
+    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
+    vAxis: {title: "Index value"},
     lineWidth: 2,
     pointSize: 3,
-    colors: ["#E53935"]
+    colors: ["#E53935", "#FB8C00", "#8E24AA"]
   });
-print(nsmiChart);
+print(monthlySedimentChart);
+
+var yearlyOverlayNdwi = ui.Chart.feature.groups(
+  monthlyChartFc.filter(ee.Filter.notNull(["ndwi_mean_chart"])),
+  "month_num",
+  "ndwi_mean_chart",
+  "year_label"
+).setChartType("LineChart")
+  .setOptions({
+    title: "NDWI Monthly Seasonality by Year",
+    hAxis: {title: "Month of year", ticks: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]},
+    vAxis: {title: "NDWI monthly mean"},
+    lineWidth: 2,
+    pointSize: 3
+  });
+print(yearlyOverlayNdwi);
+
+var yearlyOverlayNdmi = ui.Chart.feature.groups(
+  monthlyChartFc.filter(ee.Filter.notNull(["ndmi_mean_chart"])),
+  "month_num",
+  "ndmi_mean_chart",
+  "year_label"
+).setChartType("LineChart")
+  .setOptions({
+    title: "NDMI Monthly Seasonality by Year",
+    hAxis: {title: "Month of year", ticks: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]},
+    vAxis: {title: "NDMI monthly mean"},
+    lineWidth: 2,
+    pointSize: 3
+  });
+print(yearlyOverlayNdmi);
+
+var yearlyOverlayNsmi = ui.Chart.feature.groups(
+  monthlyChartFc.filter(ee.Filter.notNull(["nsmi_mean_chart"])),
+  "month_num",
+  "nsmi_mean_chart",
+  "year_label"
+).setChartType("LineChart")
+  .setOptions({
+    title: "NSMI Monthly Seasonality by Year",
+    hAxis: {title: "Month of year", ticks: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]},
+    vAxis: {title: "NSMI monthly mean"},
+    lineWidth: 2,
+    pointSize: 3
+  });
+print(yearlyOverlayNsmi);
+
+var yearlyOverlayNdssi = ui.Chart.feature.groups(
+  monthlyChartFc.filter(ee.Filter.notNull(["ndssi_mean_chart"])),
+  "month_num",
+  "ndssi_mean_chart",
+  "year_label"
+).setChartType("LineChart")
+  .setOptions({
+    title: "NDSSI Monthly Seasonality by Year",
+    hAxis: {title: "Month of year", ticks: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]},
+    vAxis: {title: "NDSSI monthly mean"},
+    lineWidth: 2,
+    pointSize: 3
+  });
+print(yearlyOverlayNdssi);
+
+var yearlyOverlayEgri = ui.Chart.feature.groups(
+  monthlyChartFc.filter(ee.Filter.notNull(["egri_mean_chart"])),
+  "month_num",
+  "egri_mean_chart",
+  "year_label"
+).setChartType("LineChart")
+  .setOptions({
+    title: "EGRI Monthly Seasonality by Year",
+    hAxis: {title: "Month of year", ticks: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]},
+    vAxis: {title: "EGRI monthly mean"},
+    lineWidth: 2,
+    pointSize: 3
+  });
+print(yearlyOverlayEgri);
 
 var waterPxChart = ui.Chart.feature.byFeature(
-  chartFc.filter(ee.Filter.notNull(["water_px_chart"])),
+  monthlyChartFc.filter(ee.Filter.notNull(["water_px_mean_chart"])),
   "date",
-  ["water_px_chart"]
+  ["water_px_mean_chart"]
 ).setChartType("ColumnChart")
   .setOptions({
-    title: "Impact Pool Water Pixels Used Per Image",
-    hAxis: {title: "Image date", slantedText: true, slantedTextAngle: 45},
-    vAxis: {title: "Water pixels at 10 m"},
+    title: "Monthly Mean Water Pixels Used",
+    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
+    vAxis: {title: "Mean water pixels at 10 m"},
     legend: {position: "none"},
     colors: ["#26A69A"]
   });
