@@ -165,6 +165,44 @@ function summarizePolygon(feature, imageCollection, monthImage, imageCount) {
   });
 }
 
+function summarizePolygonForSingleImage(feature, image, imageLabel, imageCount) {
+  feature = ee.Feature(feature);
+  var geom = feature.geometry();
+  var validMask = image.select("B4").mask().clip(geom);
+
+  var validPx = ee.Number(ee.Algorithms.If(
+    imageCount.gt(0),
+    validMask.reduceRegion({
+      reducer: ee.Reducer.count(),
+      geometry: geom,
+      scale: analysisScaleMeters,
+      bestEffort: true,
+      maxPixels: 1e8
+    }).get("B4"),
+    0
+  ));
+
+  var stats = ee.Dictionary(ee.Algorithms.If(
+    validPx.gt(0),
+    image.select(["NDSSI", "EGRI"]).updateMask(validMask).reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: geom,
+      scale: analysisScaleMeters,
+      bestEffort: true,
+      maxPixels: 1e8
+    }),
+    ee.Dictionary({})
+  ));
+
+  return feature.set({
+    valid_px: validPx,
+    has_valid_pixels: validPx.gt(0),
+    ndssi_mean: stats.get("NDSSI"),
+    egri_mean: stats.get("EGRI"),
+    image_label: imageLabel
+  });
+}
+
 // ================= INPUTS =================
 var polygons = ee.FeatureCollection([
   ee.Feature(toGeometry(impact_pool), {polygon_id: "impact_pool", distance_m: 0}),
@@ -195,6 +233,16 @@ function buildMonthSummary(config) {
     .map(addIndices);
 
   var imageCount = s2.size();
+  var firstImage = ee.Image(ee.Algorithms.If(
+    imageCount.gt(0),
+    s2.sort("system:time_start").first(),
+    ee.Image.constant([0, 0, 0, 0, 0, 0]).rename(["B2", "B3", "B4", "B8", "NDSSI", "EGRI"]).clip(aoi).selfMask()
+  ));
+  var firstImageLabel = ee.String(ee.Algorithms.If(
+    imageCount.gt(0),
+    ee.Date(firstImage.get("system:time_start")).format("YYYY-MM-dd HH:mm"),
+    "no_valid_image"
+  ));
   var monthImage = ee.Image(ee.Algorithms.If(
     imageCount.gt(0),
     s2.median().clip(aoi),
@@ -206,6 +254,10 @@ function buildMonthSummary(config) {
   }).sort("distance_m");
 
   var validSignalStats = polygonStats.filter(ee.Filter.gt("valid_px", 0));
+  var firstImagePolygonStats = polygons.map(function(feature) {
+    return summarizePolygonForSingleImage(feature, firstImage, firstImageLabel, imageCount);
+  }).sort("distance_m");
+  var firstImageValidSignalStats = firstImagePolygonStats.filter(ee.Filter.gt("valid_px", 0));
 
   return {
     title: config.title,
@@ -213,9 +265,13 @@ function buildMonthSummary(config) {
     monthStart: monthStart,
     monthEnd: monthEnd,
     imageCount: imageCount,
+    firstImage: firstImage,
+    firstImageLabel: firstImageLabel,
     monthImage: monthImage,
     polygonStats: polygonStats,
-    validSignalStats: validSignalStats
+    validSignalStats: validSignalStats,
+    firstImagePolygonStats: firstImagePolygonStats,
+    firstImageValidSignalStats: firstImageValidSignalStats
   };
 }
 
@@ -229,6 +285,15 @@ var combinedValidSignalStats = ee.FeatureCollection(monthSummaries.map(function(
     return ee.Feature(feature).set({
       month_label: summary.title,
       month_key: summary.label
+    });
+  });
+})).flatten();
+var combinedFirstImageSignalStats = ee.FeatureCollection(monthSummaries.map(function(summary) {
+  return summary.firstImageValidSignalStats.map(function(feature) {
+    return ee.Feature(feature).set({
+      month_label: summary.title,
+      month_key: summary.label,
+      image_label: summary.firstImageLabel
     });
   });
 })).flatten();
@@ -250,10 +315,12 @@ monthSummaries.forEach(function(summary, idx) {
 
   print(summary.title + " window", summary.monthStart.format("YYYY-MM-dd"), summary.monthEnd.format("YYYY-MM-dd"));
   print(summary.title + " Sentinel-2 image count after filtering", summary.imageCount);
+  print(summary.title + " first valid image used for single-image charts", summary.firstImageLabel);
   print(summary.title + " valid pixel feasibility by polygon", summary.polygonStats);
   print(summary.title + " polygons with valid pixels", summary.polygonStats.filter(ee.Filter.gt("valid_px", 0)));
   print(summary.title + " polygons with zero valid pixels", summary.polygonStats.filter(ee.Filter.eq("valid_px", 0)));
   print(summary.title + " polygon signal summary for comparison", summary.validSignalStats);
+  print(summary.title + " first-image polygon signal summary", summary.firstImageValidSignalStats);
 
   print(ui.Chart.feature.byFeature(
     summary.polygonStats,
@@ -293,6 +360,34 @@ print(ui.Chart.feature.groups(
   lineWidth: 2,
   pointSize: 5,
   colors: ["#1565C0", "#6A1B9A"]
+}));
+
+print(ui.Chart.feature.groups(
+  combinedFirstImageSignalStats,
+  "distance_m",
+  "egri_mean",
+  "image_label"
+).setChartType("LineChart").setOptions({
+  title: "EGRI by Distance Downstream (First Valid Image of Month)",
+  hAxis: {title: "Distance from impact pool (m)"},
+  vAxis: {title: "Mean EGRI"},
+  lineWidth: 2,
+  pointSize: 5,
+  colors: ["#1B5E20", "#B71C1C"]
+}));
+
+print(ui.Chart.feature.groups(
+  combinedFirstImageSignalStats,
+  "distance_m",
+  "ndssi_mean",
+  "image_label"
+).setChartType("LineChart").setOptions({
+  title: "NDSSI by Distance Downstream (First Valid Image of Month)",
+  hAxis: {title: "Distance from impact pool (m)"},
+  vAxis: {title: "Mean NDSSI"},
+  lineWidth: 2,
+  pointSize: 5,
+  colors: ["#0D47A1", "#4A148C"]
 }));
 
 print("Script ready. It now compares February 2023 and January 2024. If you meant February 2024 instead of January 2024, change analysisMonths accordingly.");
