@@ -86,7 +86,7 @@ function addIndices(img) {
   return img.addBands([ndssi, egri]);
 }
 
-function summarizePolygon(feature, monthImage, imageCount) {
+function summarizePolygon(feature, imageCollection, monthImage, imageCount) {
   feature = ee.Feature(feature);
   var geom = feature.geometry();
   var areaSqm = geom.area(1);
@@ -104,14 +104,45 @@ function summarizePolygon(feature, monthImage, imageCount) {
     0
   ));
 
-  var stats = ee.Dictionary(ee.Algorithms.If(
-    validPx.gt(0),
-    monthImage.select(["NDSSI", "EGRI"]).updateMask(validMask).reduceRegion({
-      reducer: ee.Reducer.mean(),
-      geometry: geom,
-      scale: analysisScaleMeters,
-      bestEffort: true,
-      maxPixels: 1e8
+  var perImageStats = ee.FeatureCollection(ee.Algorithms.If(
+    imageCount.gt(0),
+    imageCollection.map(function(img) {
+      var imageValidMask = img.select("B4").mask().clip(geom);
+      var imageValidPx = ee.Number(imageValidMask.reduceRegion({
+        reducer: ee.Reducer.count(),
+        geometry: geom,
+        scale: analysisScaleMeters,
+        bestEffort: true,
+        maxPixels: 1e8
+      }).get("B4"));
+
+      var imageStats = ee.Dictionary(ee.Algorithms.If(
+        imageValidPx.gt(0),
+        img.select(["NDSSI", "EGRI"]).updateMask(imageValidMask).reduceRegion({
+          reducer: ee.Reducer.mean(),
+          geometry: geom,
+          scale: analysisScaleMeters,
+          bestEffort: true,
+          maxPixels: 1e8
+        }),
+        ee.Dictionary({})
+      ));
+
+      return ee.Feature(null, {
+        valid_px: imageValidPx,
+        ndssi_mean: imageStats.get("NDSSI"),
+        egri_mean: imageStats.get("EGRI")
+      });
+    }),
+    ee.FeatureCollection([])
+  ));
+
+  var validPerImageStats = perImageStats.filter(ee.Filter.gt("valid_px", 0));
+  var monthlyMedianStats = ee.Dictionary(ee.Algorithms.If(
+    validPerImageStats.size().gt(0),
+    validPerImageStats.reduceColumns({
+      reducer: ee.Reducer.median().repeat(2),
+      selectors: ["ndssi_mean", "egri_mean"]
     }),
     ee.Dictionary({})
   ));
@@ -121,8 +152,9 @@ function summarizePolygon(feature, monthImage, imageCount) {
     image_count: imageCount,
     valid_px: validPx,
     has_valid_pixels: validPx.gt(0),
-    ndssi_mean: stats.get("NDSSI"),
-    egri_mean: stats.get("EGRI")
+    ndssi_mean: monthlyMedianStats.get("median"),
+    egri_mean: monthlyMedianStats.get("median_1"),
+    per_image_valid_count: validPerImageStats.size()
   });
 }
 
@@ -163,7 +195,7 @@ function buildMonthSummary(config) {
   ));
 
   var polygonStats = polygons.map(function(feature) {
-    return summarizePolygon(feature, monthImage, imageCount);
+    return summarizePolygon(feature, s2, monthImage, imageCount);
   }).sort("distance_m");
 
   var validSignalStats = polygonStats.filter(ee.Filter.gt("valid_px", 0));
