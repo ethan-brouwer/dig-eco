@@ -4,6 +4,7 @@
            downstream polygons for February 2023.
 
   GEE IMPORTS REQUIRED
+  - impact_pool
   - Poly500m
   - Poly1000m
   - Poly1500m
@@ -119,6 +120,7 @@ function summarizePolygon(feature) {
 
 // ================= INPUTS =================
 var polygons = ee.FeatureCollection([
+  ee.Feature(toGeometry(impact_pool), {polygon_id: "impact_pool", distance_m: 0}),
   ee.Feature(toGeometry(Poly500m), {polygon_id: "Poly500m", distance_m: 500}),
   ee.Feature(toGeometry(Poly1000m), {polygon_id: "Poly1000m", distance_m: 1000}),
   ee.Feature(toGeometry(Poly1500m), {polygon_id: "Poly1500m", distance_m: 1500}),
@@ -171,6 +173,9 @@ print("Valid pixel feasibility by polygon", polygonStats);
 print("Polygons with valid pixels", polygonStats.filter(ee.Filter.gt("valid_px", 0)));
 print("Polygons with zero valid pixels", polygonStats.filter(ee.Filter.eq("valid_px", 0)));
 
+var validSignalStats = polygonStats.filter(ee.Filter.gt("valid_px", 0));
+print("Polygon signal summary for comparison", validSignalStats);
+
 var validPxChart = ui.Chart.feature.byFeature(
   polygonStats,
   "polygon_id",
@@ -182,5 +187,33 @@ var validPxChart = ui.Chart.feature.byFeature(
   colors: ["#FB8C00"]
 });
 print(validPxChart);
+
+var egriDistanceChart = ui.Chart.feature.byFeature(
+  validSignalStats,
+  "distance_m",
+  ["egri_mean"]
+).setChartType("LineChart").setOptions({
+  title: "February 2023 EGRI by Distance Downstream",
+  hAxis: {title: "Distance from impact pool (m)"},
+  vAxis: {title: "Mean EGRI"},
+  lineWidth: 2,
+  pointSize: 5,
+  colors: ["#2E7D32"]
+});
+print(egriDistanceChart);
+
+var ndssiDistanceChart = ui.Chart.feature.byFeature(
+  validSignalStats,
+  "distance_m",
+  ["ndssi_mean"]
+).setChartType("LineChart").setOptions({
+  title: "February 2023 NDSSI by Distance Downstream",
+  hAxis: {title: "Distance from impact pool (m)"},
+  vAxis: {title: "Mean NDSSI"},
+  lineWidth: 2,
+  pointSize: 5,
+  colors: ["#1565C0"]
+});
+print(ndssiDistanceChart);
 
 print("Script ready. Check the polygon table first; if most polygons have zero or only a few valid pixels, the geometry size or month choice is too constrained for this analysis.");
