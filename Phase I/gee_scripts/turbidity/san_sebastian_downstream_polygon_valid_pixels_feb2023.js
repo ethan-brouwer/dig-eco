@@ -10,6 +10,11 @@
   - Poly1500m
   - Poly2000m
   - Poly2500m
+  - Poly3000m
+  - Poly3500m
+  - Poly4000m
+  - Poly4500m
+  - Poly5000m
 */
 
 // ================= USER SETTINGS =================
@@ -125,7 +130,12 @@ var polygons = ee.FeatureCollection([
   ee.Feature(toGeometry(Poly1000m), {polygon_id: "Poly1000m", distance_m: 1000}),
   ee.Feature(toGeometry(Poly1500m), {polygon_id: "Poly1500m", distance_m: 1500}),
   ee.Feature(toGeometry(Poly2000m), {polygon_id: "Poly2000m", distance_m: 2000}),
-  ee.Feature(toGeometry(Poly2500m), {polygon_id: "Poly2500m", distance_m: 2500})
+  ee.Feature(toGeometry(Poly2500m), {polygon_id: "Poly2500m", distance_m: 2500}),
+  ee.Feature(toGeometry(Poly3000m), {polygon_id: "Poly3000m", distance_m: 3000}),
+  ee.Feature(toGeometry(Poly3500m), {polygon_id: "Poly3500m", distance_m: 3500}),
+  ee.Feature(toGeometry(Poly4000m), {polygon_id: "Poly4000m", distance_m: 4000}),
+  ee.Feature(toGeometry(Poly4500m), {polygon_id: "Poly4500m", distance_m: 4500}),
+  ee.Feature(toGeometry(Poly5000m), {polygon_id: "Poly5000m", distance_m: 5000})
 ]);
 
 var aoi = polygons.geometry().bounds().buffer(250);
@@ -159,9 +169,9 @@ Map.addLayer(
 );
 
 Map.addLayer(
-  monthImage.select("EGRI"),
-  {min: 0.5, max: 2.0, palette: ["#7F0000", "#FDD49E", "#238B45"]},
-  "February 2023 EGRI",
+  monthImage.select("NDSSI"),
+  {min: -0.4, max: 0.4, palette: ["#7B3294", "#F7F7F7", "#008837"]},
+  "February 2023 NDSSI",
   false
 );
 
