@@ -6,7 +6,8 @@
 
   METHODOLOGY NOTE
   - Monthly summaries and single-image comparisons only use images where
-    all polygons have valid pixels. Partial-coverage scenes are excluded.
+    all but one polygon have valid pixels, at minimum. Partial-coverage
+    scenes below that threshold are excluded.
 
   GEE IMPORTS REQUIRED
   - impact_pool
@@ -25,6 +26,7 @@
 // ================= USER SETTINGS =================
 var cloudMax = 60;
 var analysisScaleMeters = 10;
+var allowedMissingPolygons = 1;
 var analysisMonths = [
   {label: "2023-02", title: "February 2023", start: ee.Date("2023-02-01")},
   {label: "2024-01", title: "January 2024", start: ee.Date("2024-01-01")}
@@ -232,7 +234,13 @@ function imageHasAllPolygonsValid(image) {
     .filter(ee.Filter.eq("has_valid", true))
     .size();
 
-  return image.set("all_polygons_valid", validCount.eq(polygons.size()));
+  var minValidPolygons = polygons.size().subtract(allowedMissingPolygons);
+  return image.set({
+    all_polygons_valid: validCount.eq(polygons.size()),
+    enough_polygons_valid: validCount.gte(minValidPolygons),
+    valid_polygon_count: validCount,
+    missing_polygon_count: polygons.size().subtract(validCount)
+  });
 }
 
 // ================= INPUTS =================
@@ -266,7 +274,7 @@ function buildMonthSummary(config) {
     .map(imageHasAllPolygonsValid);
 
   var imageCount = s2.size();
-  var fullyValidImages = s2.filter(ee.Filter.eq("all_polygons_valid", true));
+  var fullyValidImages = s2.filter(ee.Filter.eq("enough_polygons_valid", true));
   var fullyValidImageCount = fullyValidImages.size();
   var firstImage = ee.Image(ee.Algorithms.If(
     fullyValidImageCount.gt(0),
@@ -276,7 +284,7 @@ function buildMonthSummary(config) {
   var firstImageLabel = ee.String(ee.Algorithms.If(
     fullyValidImageCount.gt(0),
     ee.Date(firstImage.get("system:time_start")).format("YYYY-MM-dd HH:mm"),
-    "no_image_with_all_polygons_valid"
+    "no_image_meeting_polygon_threshold"
   ));
   var monthImage = ee.Image(ee.Algorithms.If(
     imageCount.gt(0),
@@ -351,12 +359,13 @@ monthSummaries.forEach(function(summary, idx) {
 
   print(summary.title + " window", summary.monthStart.format("YYYY-MM-dd"), summary.monthEnd.format("YYYY-MM-dd"));
   print(summary.title + " Sentinel-2 image count after filtering", summary.imageCount);
-  print(summary.title + " images with all polygons valid", summary.fullyValidImageCount);
-  print(summary.title + " first image with all polygons valid used for single-image charts", summary.firstImageLabel);
-  print(summary.title + " valid pixel feasibility by polygon (fully valid image subset only)", summary.polygonStats);
-  print(summary.title + " polygons with valid pixels (fully valid image subset only)", summary.polygonStats.filter(ee.Filter.gt("valid_px", 0)));
-  print(summary.title + " polygons with zero valid pixels (fully valid image subset only)", summary.polygonStats.filter(ee.Filter.eq("valid_px", 0)));
-  print(summary.title + " polygon signal summary for comparison (fully valid image subset only)", summary.validSignalStats);
+  print("Allowed missing polygons", allowedMissingPolygons);
+  print(summary.title + " images meeting polygon coverage threshold", summary.fullyValidImageCount);
+  print(summary.title + " first image meeting polygon coverage threshold used for single-image charts", summary.firstImageLabel);
+  print(summary.title + " valid pixel feasibility by polygon (coverage-threshold subset only)", summary.polygonStats);
+  print(summary.title + " polygons with valid pixels (coverage-threshold subset only)", summary.polygonStats.filter(ee.Filter.gt("valid_px", 0)));
+  print(summary.title + " polygons with zero valid pixels (coverage-threshold subset only)", summary.polygonStats.filter(ee.Filter.eq("valid_px", 0)));
+  print(summary.title + " polygon signal summary for comparison (coverage-threshold subset only)", summary.validSignalStats);
   print(summary.title + " first-image polygon signal summary", summary.firstImageValidSignalStats);
 
   print(ui.Chart.feature.byFeature(
@@ -364,7 +373,7 @@ monthSummaries.forEach(function(summary, idx) {
     "polygon_id",
     ["valid_px"]
   ).setChartType("ColumnChart").setOptions({
-    title: summary.title + " Valid Pixels by Polygon (Fully Valid Images Only)",
+    title: summary.title + " Valid Pixels by Polygon (Coverage Threshold Applied)",
     hAxis: {title: "Polygon"},
     vAxis: {title: "Valid pixels at 10 m"},
     colors: ["#FB8C00"]
@@ -377,7 +386,7 @@ print(ui.Chart.feature.groups(
   "egri_mean",
   "month_label"
 ).setChartType("LineChart").setOptions({
-  title: "EGRI by Distance Downstream (Fully Valid Images Only)",
+  title: "EGRI by Distance Downstream (Coverage Threshold Applied)",
   hAxis: {title: "Distance from impact pool (m)"},
   vAxis: {title: "Mean EGRI"},
   lineWidth: 2,
@@ -391,7 +400,7 @@ print(ui.Chart.feature.groups(
   "ndssi_mean",
   "month_label"
 ).setChartType("LineChart").setOptions({
-  title: "NDSSI by Distance Downstream (Fully Valid Images Only)",
+  title: "NDSSI by Distance Downstream (Coverage Threshold Applied)",
   hAxis: {title: "Distance from impact pool (m)"},
   vAxis: {title: "Mean NDSSI"},
   lineWidth: 2,
@@ -427,4 +436,4 @@ print(ui.Chart.feature.groups(
   colors: ["#0D47A1", "#4A148C"]
 }));
 
-print("Script ready. Monthly summaries and first-image charts now require complete polygon coverage. If you meant February 2024 instead of January 2024, change analysisMonths accordingly.");
+print("Script ready. Monthly summaries and first-image charts now require all but one polygon to have valid coverage. If you meant February 2024 instead of January 2024, change analysisMonths accordingly.");
