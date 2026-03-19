@@ -1,7 +1,8 @@
 /*
   FILE: Phase I/gee_scripts/turbidity/san_sebastian_downstream_polygon_valid_pixels_feb2023.js
-  PURPOSE: Quick feasibility check for valid Sentinel-2 pixels inside user-drawn
-           downstream polygons for February 2023.
+  PURPOSE: Quick feasibility check for valid Sentinel-2 pixels plus monthly
+           EGRI / NDSSI distance comparisons across user-drawn downstream
+           polygons for February 2023 and January 2024.
 
   GEE IMPORTS REQUIRED
   - impact_pool
@@ -20,8 +21,10 @@
 // ================= USER SETTINGS =================
 var cloudMax = 60;
 var analysisScaleMeters = 10;
-var monthStart = ee.Date("2023-02-01");
-var monthEnd = monthStart.advance(1, "month");
+var analysisMonths = [
+  {label: "2023-02", title: "February 2023", start: ee.Date("2023-02-01")},
+  {label: "2024-01", title: "January 2024", start: ee.Date("2024-01-01")}
+];
 
 // ================= HELPERS =================
 function toGeometry(obj) {
@@ -83,7 +86,7 @@ function addIndices(img) {
   return img.addBands([ndssi, egri]);
 }
 
-function summarizePolygon(feature) {
+function summarizePolygon(feature, monthImage, imageCount) {
   feature = ee.Feature(feature);
   var geom = feature.geometry();
   var areaSqm = geom.area(1);
@@ -140,90 +143,107 @@ var polygons = ee.FeatureCollection([
 
 var aoi = polygons.geometry().bounds().buffer(250);
 
-// ================= COLLECTION =================
-var s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
-  .filterBounds(aoi)
-  .filterDate(monthStart, monthEnd)
-  .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", cloudMax))
-  .map(scaleAndSelectS2)
-  .map(maskS2)
-  .map(addIndices);
+function buildMonthSummary(config) {
+  var monthStart = config.start;
+  var monthEnd = monthStart.advance(1, "month");
 
-var imageCount = s2.size();
-var monthImage = ee.Image(ee.Algorithms.If(
-  imageCount.gt(0),
-  s2.median().clip(aoi),
-  ee.Image.constant([0, 0, 0, 0, 0, 0]).rename(["B2", "B3", "B4", "B8", "NDSSI", "EGRI"]).clip(aoi).selfMask()
-));
+  var s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+    .filterBounds(aoi)
+    .filterDate(monthStart, monthEnd)
+    .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", cloudMax))
+    .map(scaleAndSelectS2)
+    .map(maskS2)
+    .map(addIndices);
+
+  var imageCount = s2.size();
+  var monthImage = ee.Image(ee.Algorithms.If(
+    imageCount.gt(0),
+    s2.median().clip(aoi),
+    ee.Image.constant([0, 0, 0, 0, 0, 0]).rename(["B2", "B3", "B4", "B8", "NDSSI", "EGRI"]).clip(aoi).selfMask()
+  ));
+
+  var polygonStats = polygons.map(function(feature) {
+    return summarizePolygon(feature, monthImage, imageCount);
+  }).sort("distance_m");
+
+  var validSignalStats = polygonStats.filter(ee.Filter.gt("valid_px", 0));
+
+  return {
+    title: config.title,
+    label: config.label,
+    monthStart: monthStart,
+    monthEnd: monthEnd,
+    imageCount: imageCount,
+    monthImage: monthImage,
+    polygonStats: polygonStats,
+    validSignalStats: validSignalStats
+  };
+}
 
 // ================= OUTPUTS =================
 Map.setOptions("SATELLITE");
 Map.centerObject(aoi, 15);
 Map.addLayer(polygons, {color: "FFB300"}, "Downstream polygons", true);
+var monthSummaries = analysisMonths.map(buildMonthSummary);
 
-Map.addLayer(
-  monthImage.select(["B4", "B3", "B2"]),
-  {min: 0.02, max: 0.3},
-  "February 2023 RGB",
-  true
-);
+monthSummaries.forEach(function(summary, idx) {
+  Map.addLayer(
+    summary.monthImage.select(["B4", "B3", "B2"]),
+    {min: 0.02, max: 0.3},
+    summary.title + " RGB",
+    idx === 0
+  );
 
-Map.addLayer(
-  monthImage.select("NDSSI"),
-  {min: -0.4, max: 0.4, palette: ["#7B3294", "#F7F7F7", "#008837"]},
-  "February 2023 NDSSI",
-  false
-);
+  Map.addLayer(
+    summary.monthImage.select("NDSSI"),
+    {min: -0.4, max: 0.4, palette: ["#7B3294", "#F7F7F7", "#008837"]},
+    summary.title + " NDSSI",
+    false
+  );
 
-var polygonStats = polygons.map(summarizePolygon).sort("distance_m");
+  print(summary.title + " window", summary.monthStart.format("YYYY-MM-dd"), summary.monthEnd.format("YYYY-MM-dd"));
+  print(summary.title + " Sentinel-2 image count after filtering", summary.imageCount);
+  print(summary.title + " valid pixel feasibility by polygon", summary.polygonStats);
+  print(summary.title + " polygons with valid pixels", summary.polygonStats.filter(ee.Filter.gt("valid_px", 0)));
+  print(summary.title + " polygons with zero valid pixels", summary.polygonStats.filter(ee.Filter.eq("valid_px", 0)));
+  print(summary.title + " polygon signal summary for comparison", summary.validSignalStats);
 
-print("Month window", monthStart.format("YYYY-MM-dd"), monthEnd.format("YYYY-MM-dd"));
-print("Sentinel-2 image count after filtering", imageCount);
-print("Valid pixel feasibility by polygon", polygonStats);
-print("Polygons with valid pixels", polygonStats.filter(ee.Filter.gt("valid_px", 0)));
-print("Polygons with zero valid pixels", polygonStats.filter(ee.Filter.eq("valid_px", 0)));
+  print(ui.Chart.feature.byFeature(
+    summary.polygonStats,
+    "polygon_id",
+    ["valid_px"]
+  ).setChartType("ColumnChart").setOptions({
+    title: summary.title + " Valid Pixels by Polygon",
+    hAxis: {title: "Polygon"},
+    vAxis: {title: "Valid pixels at 10 m"},
+    colors: ["#FB8C00"]
+  }));
 
-var validSignalStats = polygonStats.filter(ee.Filter.gt("valid_px", 0));
-print("Polygon signal summary for comparison", validSignalStats);
+  print(ui.Chart.feature.byFeature(
+    summary.validSignalStats,
+    "distance_m",
+    ["egri_mean"]
+  ).setChartType("LineChart").setOptions({
+    title: summary.title + " EGRI by Distance Downstream",
+    hAxis: {title: "Distance from impact pool (m)"},
+    vAxis: {title: "Mean EGRI"},
+    lineWidth: 2,
+    pointSize: 5,
+    colors: ["#2E7D32"]
+  }));
 
-var validPxChart = ui.Chart.feature.byFeature(
-  polygonStats,
-  "polygon_id",
-  ["valid_px"]
-).setChartType("ColumnChart").setOptions({
-  title: "February 2023 Valid Pixels by Polygon",
-  hAxis: {title: "Polygon"},
-  vAxis: {title: "Valid pixels at 10 m"},
-  colors: ["#FB8C00"]
+  print(ui.Chart.feature.byFeature(
+    summary.validSignalStats,
+    "distance_m",
+    ["ndssi_mean"]
+  ).setChartType("LineChart").setOptions({
+    title: summary.title + " NDSSI by Distance Downstream",
+    hAxis: {title: "Distance from impact pool (m)"},
+    vAxis: {title: "Mean NDSSI"},
+    lineWidth: 2,
+    pointSize: 5,
+    colors: ["#1565C0"]
+  }));
 });
-print(validPxChart);
 
-var egriDistanceChart = ui.Chart.feature.byFeature(
-  validSignalStats,
-  "distance_m",
-  ["egri_mean"]
-).setChartType("LineChart").setOptions({
-  title: "February 2023 EGRI by Distance Downstream",
-  hAxis: {title: "Distance from impact pool (m)"},
-  vAxis: {title: "Mean EGRI"},
-  lineWidth: 2,
-  pointSize: 5,
-  colors: ["#2E7D32"]
-});
-print(egriDistanceChart);
-
-var ndssiDistanceChart = ui.Chart.feature.byFeature(
-  validSignalStats,
-  "distance_m",
-  ["ndssi_mean"]
-).setChartType("LineChart").setOptions({
-  title: "February 2023 NDSSI by Distance Downstream",
-  hAxis: {title: "Distance from impact pool (m)"},
-  vAxis: {title: "Mean NDSSI"},
-  lineWidth: 2,
-  pointSize: 5,
-  colors: ["#1565C0"]
-});
-print(ndssiDistanceChart);
-
-print("Script ready. Check the polygon table first; if most polygons have zero or only a few valid pixels, the geometry size or month choice is too constrained for this analysis.");
+print("Script ready. It now compares February 2023 and January 2024. If you meant February 2024 instead of January 2024, change analysisMonths accordingly.");
