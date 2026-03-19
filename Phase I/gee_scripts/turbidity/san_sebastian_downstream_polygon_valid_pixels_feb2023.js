@@ -97,6 +97,18 @@ function dictValueOrNull(dict, key) {
   return ee.Algorithms.If(dict.contains(key), dict.get(key), null);
 }
 
+function countMaskedPixels(image, geom) {
+  var count = image.reduceRegion({
+    reducer: ee.Reducer.count(),
+    geometry: geom,
+    scale: analysisScaleMeters,
+    bestEffort: true,
+    maxPixels: 1e8
+  }).get("B4");
+
+  return ee.Number(ee.Algorithms.If(ee.Algorithms.IsEqual(count, null), 0, count));
+}
+
 function summarizePolygon(feature, imageCollection, monthImage, imageCount) {
   feature = ee.Feature(feature);
   var geom = feature.geometry();
@@ -105,13 +117,7 @@ function summarizePolygon(feature, imageCollection, monthImage, imageCount) {
   var validMask = monthImage.select("B4").mask().clip(geom);
   var validPx = ee.Number(ee.Algorithms.If(
     imageCount.gt(0),
-    validMask.reduceRegion({
-      reducer: ee.Reducer.count(),
-      geometry: geom,
-      scale: analysisScaleMeters,
-      bestEffort: true,
-      maxPixels: 1e8
-    }).get("B4"),
+    countMaskedPixels(validMask, geom),
     0
   ));
 
@@ -119,13 +125,7 @@ function summarizePolygon(feature, imageCollection, monthImage, imageCount) {
     imageCount.gt(0),
     imageCollection.map(function(img) {
       var imageValidMask = img.select("B4").mask().clip(geom);
-      var imageValidPx = ee.Number(imageValidMask.reduceRegion({
-        reducer: ee.Reducer.count(),
-        geometry: geom,
-        scale: analysisScaleMeters,
-        bestEffort: true,
-        maxPixels: 1e8
-      }).get("B4"));
+      var imageValidPx = countMaskedPixels(imageValidMask, geom);
 
       var imageStats = ee.Dictionary(ee.Algorithms.If(
         imageValidPx.gt(0),
@@ -185,13 +185,7 @@ function summarizePolygonForSingleImage(feature, image, imageLabel, imageCount) 
 
   var validPx = ee.Number(ee.Algorithms.If(
     imageCount.gt(0),
-    validMask.reduceRegion({
-      reducer: ee.Reducer.count(),
-      geometry: geom,
-      scale: analysisScaleMeters,
-      bestEffort: true,
-      maxPixels: 1e8
-    }).get("B4"),
+    countMaskedPixels(validMask, geom),
     0
   ));
 
@@ -219,13 +213,7 @@ function summarizePolygonForSingleImage(feature, image, imageLabel, imageCount) 
 function imageHasAllPolygonsValid(image) {
   var validityChecks = polygons.map(function(feature) {
     var geom = ee.Feature(feature).geometry();
-    var validPx = ee.Number(image.select("B4").mask().clip(geom).reduceRegion({
-      reducer: ee.Reducer.count(),
-      geometry: geom,
-      scale: analysisScaleMeters,
-      bestEffort: true,
-      maxPixels: 1e8
-    }).get("B4"));
+    var validPx = countMaskedPixels(image.select("B4").mask().clip(geom), geom);
 
     return ee.Feature(null, {has_valid: validPx.gt(0)});
   });
@@ -274,6 +262,15 @@ function buildMonthSummary(config) {
     .map(imageHasAllPolygonsValid);
 
   var imageCount = s2.size();
+  var coverageDiagnostics = ee.FeatureCollection(s2.map(function(img) {
+    return ee.Feature(null, {
+      system_time_start: img.get("system:time_start"),
+      image_time: ee.Date(img.get("system:time_start")).format("YYYY-MM-dd HH:mm"),
+      valid_polygon_count: img.get("valid_polygon_count"),
+      missing_polygon_count: img.get("missing_polygon_count"),
+      enough_polygons_valid: img.get("enough_polygons_valid")
+    });
+  })).sort("system_time_start");
   var fullyValidImages = s2.filter(ee.Filter.eq("enough_polygons_valid", true));
   var fullyValidImageCount = fullyValidImages.size();
   var firstImage = ee.Image(ee.Algorithms.If(
@@ -287,7 +284,7 @@ function buildMonthSummary(config) {
     "no_image_meeting_polygon_threshold"
   ));
   var monthImage = ee.Image(ee.Algorithms.If(
-    imageCount.gt(0),
+    fullyValidImageCount.gt(0),
     fullyValidImages.median().clip(aoi),
     ee.Image.constant([0, 0, 0, 0, 0, 0]).rename(["B2", "B3", "B4", "B8", "NDSSI", "EGRI"]).clip(aoi).selfMask()
   ));
@@ -308,6 +305,7 @@ function buildMonthSummary(config) {
     monthStart: monthStart,
     monthEnd: monthEnd,
     imageCount: imageCount,
+    coverageDiagnostics: coverageDiagnostics,
     fullyValidImageCount: fullyValidImageCount,
     firstImage: firstImage,
     firstImageLabel: firstImageLabel,
@@ -360,6 +358,7 @@ monthSummaries.forEach(function(summary, idx) {
   print(summary.title + " window", summary.monthStart.format("YYYY-MM-dd"), summary.monthEnd.format("YYYY-MM-dd"));
   print(summary.title + " Sentinel-2 image count after filtering", summary.imageCount);
   print("Allowed missing polygons", allowedMissingPolygons);
+  print(summary.title + " image coverage diagnostics", summary.coverageDiagnostics);
   print(summary.title + " images meeting polygon coverage threshold", summary.fullyValidImageCount);
   print(summary.title + " first image meeting polygon coverage threshold used for single-image charts", summary.firstImageLabel);
   print(summary.title + " valid pixel feasibility by polygon (coverage-threshold subset only)", summary.polygonStats);
