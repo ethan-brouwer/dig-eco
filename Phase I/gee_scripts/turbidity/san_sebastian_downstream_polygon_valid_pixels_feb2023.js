@@ -138,22 +138,29 @@ function summarizePolygon(feature, imageCollection, monthImage, imageCount) {
   ));
 
   var validPerImageStats = perImageStats.filter(ee.Filter.gt("valid_px", 0));
-  var monthlyMedianStats = ee.Dictionary(ee.Algorithms.If(
+  var ndssiMedian = ee.Algorithms.If(
     validPerImageStats.size().gt(0),
-    validPerImageStats.reduceColumns({
-      reducer: ee.Reducer.median().repeat(2),
-      selectors: ["ndssi_mean", "egri_mean"]
-    }),
-    ee.Dictionary({})
-  ));
+    ee.Array(validPerImageStats.aggregate_array("ndssi_mean"))
+      .reduce(ee.Reducer.median(), [0])
+      .get([0]),
+    null
+  );
+
+  var egriMedian = ee.Algorithms.If(
+    validPerImageStats.size().gt(0),
+    ee.Array(validPerImageStats.aggregate_array("egri_mean"))
+      .reduce(ee.Reducer.median(), [0])
+      .get([0]),
+    null
+  );
 
   return feature.set({
     polygon_area_sqm: areaSqm,
     image_count: imageCount,
     valid_px: validPx,
     has_valid_pixels: validPx.gt(0),
-    ndssi_mean: monthlyMedianStats.get("median"),
-    egri_mean: monthlyMedianStats.get("median_1"),
+    ndssi_mean: ndssiMedian,
+    egri_mean: egriMedian,
     per_image_valid_count: validPerImageStats.size()
   });
 }
