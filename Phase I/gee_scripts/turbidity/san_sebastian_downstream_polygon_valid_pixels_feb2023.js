@@ -185,6 +185,14 @@ Map.setOptions("SATELLITE");
 Map.centerObject(aoi, 15);
 Map.addLayer(polygons, {color: "FFB300"}, "Downstream polygons", true);
 var monthSummaries = analysisMonths.map(buildMonthSummary);
+var combinedValidSignalStats = ee.FeatureCollection(monthSummaries.map(function(summary) {
+  return summary.validSignalStats.map(function(feature) {
+    return ee.Feature(feature).set({
+      month_label: summary.title,
+      month_key: summary.label
+    });
+  });
+})).flatten();
 
 monthSummaries.forEach(function(summary, idx) {
   Map.addLayer(
@@ -218,32 +226,34 @@ monthSummaries.forEach(function(summary, idx) {
     vAxis: {title: "Valid pixels at 10 m"},
     colors: ["#FB8C00"]
   }));
-
-  print(ui.Chart.feature.byFeature(
-    summary.validSignalStats,
-    "distance_m",
-    ["egri_mean"]
-  ).setChartType("LineChart").setOptions({
-    title: summary.title + " EGRI by Distance Downstream",
-    hAxis: {title: "Distance from impact pool (m)"},
-    vAxis: {title: "Mean EGRI"},
-    lineWidth: 2,
-    pointSize: 5,
-    colors: ["#2E7D32"]
-  }));
-
-  print(ui.Chart.feature.byFeature(
-    summary.validSignalStats,
-    "distance_m",
-    ["ndssi_mean"]
-  ).setChartType("LineChart").setOptions({
-    title: summary.title + " NDSSI by Distance Downstream",
-    hAxis: {title: "Distance from impact pool (m)"},
-    vAxis: {title: "Mean NDSSI"},
-    lineWidth: 2,
-    pointSize: 5,
-    colors: ["#1565C0"]
-  }));
 });
+
+print(ui.Chart.feature.groups(
+  combinedValidSignalStats,
+  "distance_m",
+  "egri_mean",
+  "month_label"
+).setChartType("LineChart").setOptions({
+  title: "EGRI by Distance Downstream",
+  hAxis: {title: "Distance from impact pool (m)"},
+  vAxis: {title: "Mean EGRI"},
+  lineWidth: 2,
+  pointSize: 5,
+  colors: ["#2E7D32", "#C62828"]
+}));
+
+print(ui.Chart.feature.groups(
+  combinedValidSignalStats,
+  "distance_m",
+  "ndssi_mean",
+  "month_label"
+).setChartType("LineChart").setOptions({
+  title: "NDSSI by Distance Downstream",
+  hAxis: {title: "Distance from impact pool (m)"},
+  vAxis: {title: "Mean NDSSI"},
+  lineWidth: 2,
+  pointSize: 5,
+  colors: ["#1565C0", "#6A1B9A"]
+}));
 
 print("Script ready. It now compares February 2023 and January 2024. If you meant February 2024 instead of January 2024, change analysisMonths accordingly.");
