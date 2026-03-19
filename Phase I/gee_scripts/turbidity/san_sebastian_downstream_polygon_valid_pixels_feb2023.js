@@ -90,6 +90,11 @@ function addIndices(img) {
   return img.addBands([ndssi, egri]);
 }
 
+function dictValueOrNull(dict, key) {
+  dict = ee.Dictionary(dict);
+  return ee.Algorithms.If(dict.contains(key), dict.get(key), null);
+}
+
 function summarizePolygon(feature, imageCollection, monthImage, imageCount) {
   feature = ee.Feature(feature);
   var geom = feature.geometry();
@@ -134,14 +139,16 @@ function summarizePolygon(feature, imageCollection, monthImage, imageCount) {
 
       return ee.Feature(null, {
         valid_px: imageValidPx,
-        ndssi_mean: imageStats.get("NDSSI"),
-        egri_mean: imageStats.get("EGRI")
+        ndssi_mean: dictValueOrNull(imageStats, "NDSSI"),
+        egri_mean: dictValueOrNull(imageStats, "EGRI")
       });
     }),
     ee.FeatureCollection([])
   ));
 
-  var validPerImageStats = perImageStats.filter(ee.Filter.gt("valid_px", 0));
+  var validPerImageStats = perImageStats
+    .filter(ee.Filter.gt("valid_px", 0))
+    .filter(ee.Filter.notNull(["ndssi_mean", "egri_mean"]));
   var ndssiMedian = ee.Algorithms.If(
     validPerImageStats.size().gt(0),
     ee.Array(validPerImageStats.aggregate_array("ndssi_mean"))
@@ -201,8 +208,8 @@ function summarizePolygonForSingleImage(feature, image, imageLabel, imageCount) 
   return feature.set({
     valid_px: validPx,
     has_valid_pixels: validPx.gt(0),
-    ndssi_mean: stats.get("NDSSI"),
-    egri_mean: stats.get("EGRI"),
+    ndssi_mean: dictValueOrNull(stats, "NDSSI"),
+    egri_mean: dictValueOrNull(stats, "EGRI"),
     image_label: imageLabel
   });
 }
