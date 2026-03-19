@@ -4,6 +4,10 @@
            EGRI / NDSSI distance comparisons across user-drawn downstream
            polygons for February 2023 and January 2024.
 
+  METHODOLOGY NOTE
+  - Monthly summaries and single-image comparisons only use images where
+    all polygons have valid pixels. Partial-coverage scenes are excluded.
+
   GEE IMPORTS REQUIRED
   - impact_pool
   - Poly500m
@@ -203,6 +207,27 @@ function summarizePolygonForSingleImage(feature, image, imageLabel, imageCount) 
   });
 }
 
+function imageHasAllPolygonsValid(image) {
+  var validityChecks = polygons.map(function(feature) {
+    var geom = ee.Feature(feature).geometry();
+    var validPx = ee.Number(image.select("B4").mask().clip(geom).reduceRegion({
+      reducer: ee.Reducer.count(),
+      geometry: geom,
+      scale: analysisScaleMeters,
+      bestEffort: true,
+      maxPixels: 1e8
+    }).get("B4"));
+
+    return ee.Feature(null, {has_valid: validPx.gt(0)});
+  });
+
+  var validCount = ee.FeatureCollection(validityChecks)
+    .filter(ee.Filter.eq("has_valid", true))
+    .size();
+
+  return image.set("all_polygons_valid", validCount.eq(polygons.size()));
+}
+
 // ================= INPUTS =================
 var polygons = ee.FeatureCollection([
   ee.Feature(toGeometry(impact_pool), {polygon_id: "impact_pool", distance_m: 0}),
@@ -230,32 +255,35 @@ function buildMonthSummary(config) {
     .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", cloudMax))
     .map(scaleAndSelectS2)
     .map(maskS2)
-    .map(addIndices);
+    .map(addIndices)
+    .map(imageHasAllPolygonsValid);
 
   var imageCount = s2.size();
+  var fullyValidImages = s2.filter(ee.Filter.eq("all_polygons_valid", true));
+  var fullyValidImageCount = fullyValidImages.size();
   var firstImage = ee.Image(ee.Algorithms.If(
-    imageCount.gt(0),
-    s2.sort("system:time_start").first(),
+    fullyValidImageCount.gt(0),
+    fullyValidImages.sort("system:time_start").first(),
     ee.Image.constant([0, 0, 0, 0, 0, 0]).rename(["B2", "B3", "B4", "B8", "NDSSI", "EGRI"]).clip(aoi).selfMask()
   ));
   var firstImageLabel = ee.String(ee.Algorithms.If(
-    imageCount.gt(0),
+    fullyValidImageCount.gt(0),
     ee.Date(firstImage.get("system:time_start")).format("YYYY-MM-dd HH:mm"),
-    "no_valid_image"
+    "no_image_with_all_polygons_valid"
   ));
   var monthImage = ee.Image(ee.Algorithms.If(
     imageCount.gt(0),
-    s2.median().clip(aoi),
+    fullyValidImages.median().clip(aoi),
     ee.Image.constant([0, 0, 0, 0, 0, 0]).rename(["B2", "B3", "B4", "B8", "NDSSI", "EGRI"]).clip(aoi).selfMask()
   ));
 
   var polygonStats = polygons.map(function(feature) {
-    return summarizePolygon(feature, s2, monthImage, imageCount);
+    return summarizePolygon(feature, fullyValidImages, monthImage, fullyValidImageCount);
   }).sort("distance_m");
 
   var validSignalStats = polygonStats.filter(ee.Filter.gt("valid_px", 0));
   var firstImagePolygonStats = polygons.map(function(feature) {
-    return summarizePolygonForSingleImage(feature, firstImage, firstImageLabel, imageCount);
+    return summarizePolygonForSingleImage(feature, firstImage, firstImageLabel, fullyValidImageCount);
   }).sort("distance_m");
   var firstImageValidSignalStats = firstImagePolygonStats.filter(ee.Filter.gt("valid_px", 0));
 
@@ -265,6 +293,7 @@ function buildMonthSummary(config) {
     monthStart: monthStart,
     monthEnd: monthEnd,
     imageCount: imageCount,
+    fullyValidImageCount: fullyValidImageCount,
     firstImage: firstImage,
     firstImageLabel: firstImageLabel,
     monthImage: monthImage,
@@ -315,11 +344,12 @@ monthSummaries.forEach(function(summary, idx) {
 
   print(summary.title + " window", summary.monthStart.format("YYYY-MM-dd"), summary.monthEnd.format("YYYY-MM-dd"));
   print(summary.title + " Sentinel-2 image count after filtering", summary.imageCount);
-  print(summary.title + " first valid image used for single-image charts", summary.firstImageLabel);
-  print(summary.title + " valid pixel feasibility by polygon", summary.polygonStats);
-  print(summary.title + " polygons with valid pixels", summary.polygonStats.filter(ee.Filter.gt("valid_px", 0)));
-  print(summary.title + " polygons with zero valid pixels", summary.polygonStats.filter(ee.Filter.eq("valid_px", 0)));
-  print(summary.title + " polygon signal summary for comparison", summary.validSignalStats);
+  print(summary.title + " images with all polygons valid", summary.fullyValidImageCount);
+  print(summary.title + " first image with all polygons valid used for single-image charts", summary.firstImageLabel);
+  print(summary.title + " valid pixel feasibility by polygon (fully valid image subset only)", summary.polygonStats);
+  print(summary.title + " polygons with valid pixels (fully valid image subset only)", summary.polygonStats.filter(ee.Filter.gt("valid_px", 0)));
+  print(summary.title + " polygons with zero valid pixels (fully valid image subset only)", summary.polygonStats.filter(ee.Filter.eq("valid_px", 0)));
+  print(summary.title + " polygon signal summary for comparison (fully valid image subset only)", summary.validSignalStats);
   print(summary.title + " first-image polygon signal summary", summary.firstImageValidSignalStats);
 
   print(ui.Chart.feature.byFeature(
@@ -327,7 +357,7 @@ monthSummaries.forEach(function(summary, idx) {
     "polygon_id",
     ["valid_px"]
   ).setChartType("ColumnChart").setOptions({
-    title: summary.title + " Valid Pixels by Polygon",
+    title: summary.title + " Valid Pixels by Polygon (Fully Valid Images Only)",
     hAxis: {title: "Polygon"},
     vAxis: {title: "Valid pixels at 10 m"},
     colors: ["#FB8C00"]
@@ -340,7 +370,7 @@ print(ui.Chart.feature.groups(
   "egri_mean",
   "month_label"
 ).setChartType("LineChart").setOptions({
-  title: "EGRI by Distance Downstream",
+  title: "EGRI by Distance Downstream (Fully Valid Images Only)",
   hAxis: {title: "Distance from impact pool (m)"},
   vAxis: {title: "Mean EGRI"},
   lineWidth: 2,
@@ -354,7 +384,7 @@ print(ui.Chart.feature.groups(
   "ndssi_mean",
   "month_label"
 ).setChartType("LineChart").setOptions({
-  title: "NDSSI by Distance Downstream",
+  title: "NDSSI by Distance Downstream (Fully Valid Images Only)",
   hAxis: {title: "Distance from impact pool (m)"},
   vAxis: {title: "Mean NDSSI"},
   lineWidth: 2,
@@ -390,4 +420,4 @@ print(ui.Chart.feature.groups(
   colors: ["#0D47A1", "#4A148C"]
 }));
 
-print("Script ready. It now compares February 2023 and January 2024. If you meant February 2024 instead of January 2024, change analysisMonths accordingly.");
+print("Script ready. Monthly summaries and first-image charts now require complete polygon coverage. If you meant February 2024 instead of January 2024, change analysisMonths accordingly.");
