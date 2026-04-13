@@ -1,4 +1,4 @@
-*/ downstream geometry imports, paste directly into GEE/*
+/* downstream geometry imports, paste directly into GEE */
 
 var geometry = 
     /* color: #d63000 */
