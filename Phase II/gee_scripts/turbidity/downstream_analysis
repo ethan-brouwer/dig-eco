@@ -2,7 +2,8 @@
   FILE: Phase I/gee_scripts/turbidity/san_sebastian_downstream_polygon_valid_pixels_feb2023.js
   PURPOSE: Quick feasibility check for valid Sentinel-2 pixels plus monthly
            EGRI / NDSSI distance comparisons across user-drawn downstream
-           polygons for February 2023 and January 2024.
+           polygons for February 2023 and January 2024. Includes ability to create NDSSI and EGRI
+           charts for analysis of downstream points.
 
   GEE IMPORTS REQUIRED
   - impact_pool
