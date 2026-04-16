@@ -1,6 +1,6 @@
 /*
   FILE: gee/turbidity/PlanetLabImpact.js
-  PURPOSE: Add one uploaded Planet Labs RapidEye tile to the existing impact
+  PURPOSE: Add uploaded Planet Labs RapidEye tiles to the existing impact
   pool EGRI and NDSSI workflow while keeping the same imported GEE polygons.
 
   GEE IMPORTS REQUIRED
@@ -8,22 +8,27 @@
   - upstream_control
 
   ASSET SETUP
-  1. Upload the RapidEye surface reflectance GeoTIFF as an Earth Engine image.
-     Local source:
-     turb/ImpactPool_2/REOrthoTile/1645310_2012-02-14_RE4_3A_Analytic_SR_clip.tif
+  1. Upload each RapidEye surface reflectance GeoTIFF as an Earth Engine image.
 
-  2. Upload the RapidEye UDM GeoTIFF as an Earth Engine image.
-     Local source:
-     turb/ImpactPool_2/REOrthoTile/1645310_2012-02-14_RE4_3A_udm_clip.tif
+  2. Upload each matching RapidEye UDM GeoTIFF as an Earth Engine image.
 
-  3. Replace planetSrAssetId and planetUdmAssetId below with your asset IDs.
+  3. Replace the srAssetId and udmAssetId placeholders in planetScenes below.
+
+  Current local scenes:
+  - 2011-02-27 RapidEye-5
+    SR:  turb/ImpactPool(extra)_reorthotile_analytic_sr/REOrthoTile/1645310_2011-02-27_RE5_3A_Analytic_SR_clip.tif
+    UDM: turb/ImpactPool(extra)_reorthotile_analytic_sr/REOrthoTile/1645310_2011-02-27_RE5_3A_udm_clip.tif
+
+  - 2012-02-14 RapidEye-4
+    SR:  turb/ImpactPool_2/REOrthoTile/1645310_2012-02-14_RE4_3A_Analytic_SR_clip.tif
+    UDM: turb/ImpactPool_2/REOrthoTile/1645310_2012-02-14_RE4_3A_udm_clip.tif
 
   RapidEye band order used here:
   B1 = blue, B2 = green, B3 = red, B4 = red edge, B5 = nir
 */
 
 // ================= USER SETTINGS =================
-var analysisStartYear = 2012;
+var analysisStartYear = 2011;
 var cloudMax = 60;
 var sentinelScaleMeters = 10;
 var planetScaleMeters = 5;
@@ -33,10 +38,23 @@ var wetSeasonMonths = [5, 6, 7, 8, 9, 10];
 var minValidPixels = 3;
 var noDataValue = -9999;
 
-var includePlanetLabsTile = true;
-var planetSrAssetId = "projects/YOUR_PROJECT/assets/ImpactPool_2_RE_SR_20120214";
-var planetUdmAssetId = "projects/YOUR_PROJECT/assets/ImpactPool_2_RE_UDM_20120214";
-var planetAcquisitionDate = "2012-02-14";
+var includePlanetLabsTiles = true;
+var planetScenes = [
+  {
+    label: "RapidEye-5 2011-02-27",
+    sensor: "RapidEye-5",
+    acquisitionDate: "2011-02-27",
+    srAssetId: "projects/YOUR_PROJECT/assets/ImpactPool_extra_RE_SR_20110227",
+    udmAssetId: "projects/YOUR_PROJECT/assets/ImpactPool_extra_RE_UDM_20110227"
+  },
+  {
+    label: "RapidEye-4 2012-02-14",
+    sensor: "RapidEye-4",
+    acquisitionDate: "2012-02-14",
+    srAssetId: "projects/YOUR_PROJECT/assets/ImpactPool_2_RE_SR_20120214",
+    udmAssetId: "projects/YOUR_PROJECT/assets/ImpactPool_2_RE_UDM_20120214"
+  }
+];
 
 // ================= GEOMETRY HELPERS =================
 function toGeometry(obj) {
@@ -112,7 +130,6 @@ Map.addLayer(upstreamControlGeom, {color: "26A69A"}, "upstream_control", true);
 // ================= DATE WINDOW =================
 var endDate = ee.Date(Date.now());
 var startDate = ee.Date.fromYMD(analysisStartYear, 1, 1);
-var planetDate = ee.Date(planetAcquisitionDate);
 
 print("Analysis window", startDate.format("YYYY-MM-dd"), endDate.format("YYYY-MM-dd"));
 print("Collection filter geometry", "impact_pool + upstream_control");
@@ -202,12 +219,13 @@ if (useWetSeasonFilter) {
 }
 
 // ================= PLANET LABS RAPIDEYE HELPERS =================
-function makePlanetLabsImage() {
-  var sr = ee.Image(planetSrAssetId)
+function makePlanetLabsImage(scene) {
+  var sceneDate = ee.Date(scene.acquisitionDate);
+  var sr = ee.Image(scene.srAssetId)
     .select([0, 1, 2, 3, 4], ["blue", "green", "red", "red_edge", "nir"])
     .multiply(0.0001);
 
-  var udm = ee.Image(planetUdmAssetId).select([0], ["UDM"]);
+  var udm = ee.Image(scene.udmAssetId).select([0], ["UDM"]);
 
   var validMask = udm.eq(0)
     .and(sr.select("blue").gt(0))
@@ -217,45 +235,51 @@ function makePlanetLabsImage() {
 
   return addIndices(sr.updateMask(validMask))
     .set({
-      "system:time_start": planetDate.millis(),
-      date: planetDate.format("YYYY-MM-dd"),
-      month: planetDate.get("month"),
-      year: planetDate.get("year"),
-      sensor: "RapidEye-4",
+      "system:time_start": sceneDate.millis(),
+      date: sceneDate.format("YYYY-MM-dd"),
+      month: sceneDate.get("month"),
+      year: sceneDate.get("year"),
+      scene_label: scene.label,
+      sensor: scene.sensor,
       source: "Planet Labs uploaded asset",
+      sr_asset_id: scene.srAssetId,
+      udm_asset_id: scene.udmAssetId,
       analysis_scale_m: planetScaleMeters
     });
 }
 
 var planetCollection = ee.ImageCollection([]);
-var planetImage = null;
 
-if (includePlanetLabsTile) {
-  planetImage = makePlanetLabsImage();
-  planetCollection = ee.ImageCollection([planetImage]);
+if (includePlanetLabsTiles) {
+  planetCollection = ee.ImageCollection(planetScenes.map(makePlanetLabsImage));
 
-  print("Planet Labs SR asset", planetSrAssetId);
-  print("Planet Labs UDM asset", planetUdmAssetId);
-  print("Planet Labs observation", planetImage);
+  print("Planet Labs scene config", planetScenes);
+  print("Planet Labs image count", planetCollection.size());
+  print("Planet Labs observations", planetCollection);
 
-  Map.addLayer(
-    planetImage.select(["red", "green", "blue"]).clip(aoi),
-    {min: 0.02, max: 0.35, gamma: 1.2},
-    "Planet Labs RapidEye RGB 2012-02-14",
-    true
-  );
-  Map.addLayer(
-    planetImage.select("EGRI").clip(aoi),
-    {min: 0.5, max: 2.0, palette: ["#7F0000", "#FDD49E", "#238B45"]},
-    "Planet Labs EGRI 2012-02-14",
-    false
-  );
-  Map.addLayer(
-    planetImage.select("NDSSI").clip(aoi),
-    {min: -0.8, max: 0.4, palette: ["#54278F", "#2B8CBE", "#F7FCF0"]},
-    "Planet Labs NDSSI 2012-02-14",
-    false
-  );
+  planetScenes.forEach(function(scene, index) {
+    var sceneImage = makePlanetLabsImage(scene).clip(aoi);
+    var shown = index === planetScenes.length - 1;
+
+    Map.addLayer(
+      sceneImage.select(["red", "green", "blue"]),
+      {min: 0.02, max: 0.35, gamma: 1.2},
+      "Planet Labs RGB " + scene.label,
+      shown
+    );
+    Map.addLayer(
+      sceneImage.select("EGRI"),
+      {min: 0.5, max: 2.0, palette: ["#7F0000", "#FDD49E", "#238B45"]},
+      "Planet Labs EGRI " + scene.label,
+      false
+    );
+    Map.addLayer(
+      sceneImage.select("NDSSI"),
+      {min: -0.8, max: 0.4, palette: ["#54278F", "#2B8CBE", "#F7FCF0"]},
+      "Planet Labs NDSSI " + scene.label,
+      false
+    );
+  });
 }
 
 var analysisImages = s2.merge(planetCollection).sort("system:time_start");
@@ -301,11 +325,7 @@ var monthlyStats = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
       var monthImg = ee.Image(col.median()).clip(areaGeom);
       var validMask = monthImg.select("red").mask().clip(areaGeom);
       var sensorNames = col.aggregate_array("sensor").distinct().sort().join(", ");
-      var scale = ee.Number(ee.Algorithms.If(
-        sensorNames.compareTo("RapidEye-4").eq(0),
-        planetScaleMeters,
-        sentinelScaleMeters
-      ));
+      var scale = ee.Number(col.aggregate_min("analysis_scale_m"));
 
       var validPx = safeNumber(validMask.reduceRegion({
         reducer: ee.Reducer.count(),
