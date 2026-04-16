@@ -27,6 +27,7 @@ var analysisStartYear = 2012;
 var cloudMax = 60;
 var sentinelScaleMeters = 10;
 var planetScaleMeters = 5;
+var comparisonMonth = 2;
 var useWetSeasonFilter = false;
 var wetSeasonMonths = [5, 6, 7, 8, 9, 10];
 var minValidPixels = 3;
@@ -117,6 +118,7 @@ print("Analysis window", startDate.format("YYYY-MM-dd"), endDate.format("YYYY-MM
 print("Collection filter geometry", "impact_pool + upstream_control");
 print("Sentinel-2 scale (m)", sentinelScaleMeters);
 print("Planet Labs scale (m)", planetScaleMeters);
+print("Comparison month", comparisonMonth);
 print("Wet-season month filter", useWetSeasonFilter ? wetSeasonMonths : "OFF");
 print("Min valid pixels", minValidPixels);
 print("NDSSI formula", "(Blue - NIR) / (Blue + NIR)");
@@ -426,121 +428,92 @@ var deltaChartFc = deltaStats.map(function(f) {
   });
 });
 
-var egriComparisonChart = ui.Chart.feature.groups(
-  monthlyChartFc.filter(ee.Filter.notNull(["egri_mean_chart"])),
-  "date",
+var februaryStats = monthlyChartFc
+  .filter(ee.Filter.eq("month_num", comparisonMonth))
+  .filter(ee.Filter.eq("qa_flag", "valid"));
+
+var februaryDeltas = deltaChartFc
+  .filter(ee.Filter.eq("month_num", comparisonMonth))
+  .filter(ee.Filter.eq("qa_flag", "paired_valid"));
+
+print("February comparison table", februaryStats);
+print("February impact-minus-control deltas", februaryDeltas);
+
+var februaryEgriChart = ui.Chart.feature.groups(
+  februaryStats.filter(ee.Filter.notNull(["egri_mean_chart"])),
+  "year_label",
   "egri_mean_chart",
   "reach_id"
-).setChartType("LineChart")
+).setChartType("ColumnChart")
   .setOptions({
-    title: "Monthly EGRI Comparison",
-    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
-    vAxis: {title: "EGRI"},
-    lineWidth: 2,
-    pointSize: 4,
-    colors: ["#E53935", "#26A69A"]
+    title: "February EGRI by Year",
+    hAxis: {title: "Year"},
+    vAxis: {title: "Mean EGRI"},
+    bar: {groupWidth: "75%"},
+    colors: ["#E53935", "#26A69A"],
+    legend: {position: "top"}
   });
-print(egriComparisonChart);
+print(februaryEgriChart);
 
-var ndssiComparisonChart = ui.Chart.feature.groups(
-  monthlyChartFc.filter(ee.Filter.notNull(["ndssi_mean_chart"])),
-  "date",
+var februaryNdssiChart = ui.Chart.feature.groups(
+  februaryStats.filter(ee.Filter.notNull(["ndssi_mean_chart"])),
+  "year_label",
   "ndssi_mean_chart",
   "reach_id"
-).setChartType("LineChart")
+).setChartType("ColumnChart")
   .setOptions({
-    title: "Monthly NDSSI Comparison",
-    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
-    vAxis: {title: "NDSSI"},
-    lineWidth: 2,
-    pointSize: 4,
-    colors: ["#E53935", "#26A69A"]
+    title: "February NDSSI by Year",
+    hAxis: {title: "Year"},
+    vAxis: {title: "Mean NDSSI"},
+    bar: {groupWidth: "75%"},
+    colors: ["#E53935", "#26A69A"],
+    legend: {position: "top"}
   });
-print(ndssiComparisonChart);
+print(februaryNdssiChart);
 
-var egriDeltaChart = ui.Chart.feature.byFeature(
-  deltaChartFc.filter(ee.Filter.notNull(["egri_delta_chart"])),
-  "date",
+var februaryEgriDeltaChart = ui.Chart.feature.byFeature(
+  februaryDeltas.filter(ee.Filter.notNull(["egri_delta_chart"])),
+  "year_label",
   ["egri_delta_chart"]
-).setChartType("LineChart")
+).setChartType("ColumnChart")
   .setOptions({
-    title: "Monthly EGRI Delta: impact_pool - upstream_control",
-    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
+    title: "February EGRI Delta: impact_pool - upstream_control",
+    hAxis: {title: "Year"},
     vAxis: {title: "EGRI delta"},
-    lineWidth: 2,
-    pointSize: 4,
+    bar: {groupWidth: "75%"},
     colors: ["#8E24AA"]
   });
-print(egriDeltaChart);
+print(februaryEgriDeltaChart);
 
-var ndssiDeltaChart = ui.Chart.feature.byFeature(
-  deltaChartFc.filter(ee.Filter.notNull(["ndssi_delta_chart"])),
-  "date",
+var februaryNdssiDeltaChart = ui.Chart.feature.byFeature(
+  februaryDeltas.filter(ee.Filter.notNull(["ndssi_delta_chart"])),
+  "year_label",
   ["ndssi_delta_chart"]
-).setChartType("LineChart")
+).setChartType("ColumnChart")
   .setOptions({
-    title: "Monthly NDSSI Delta: impact_pool - upstream_control",
-    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
+    title: "February NDSSI Delta: impact_pool - upstream_control",
+    hAxis: {title: "Year"},
     vAxis: {title: "NDSSI delta"},
-    lineWidth: 2,
-    pointSize: 4,
+    bar: {groupWidth: "75%"},
     colors: ["#3949AB"]
   });
-print(ndssiDeltaChart);
+print(februaryNdssiDeltaChart);
 
-var impactChartFc = monthlyChartFc.filter(ee.Filter.eq("reach_id", "impact_pool"));
-var controlChartFc = monthlyChartFc.filter(ee.Filter.eq("reach_id", "upstream_control"));
-
-print(makeYearOverlayChart(
-  impactChartFc,
-  "egri_mean_chart",
-  "Impact Pool EGRI Monthly Seasonality by Year",
-  "EGRI monthly mean"
-));
-print(makeYearOverlayChart(
-  controlChartFc,
-  "egri_mean_chart",
-  "Upstream Control EGRI Monthly Seasonality by Year",
-  "EGRI monthly mean"
-));
-print(makeYearOverlayChart(
-  impactChartFc,
-  "ndssi_mean_chart",
-  "Impact Pool NDSSI Monthly Seasonality by Year",
-  "NDSSI monthly mean"
-));
-print(makeYearOverlayChart(
-  controlChartFc,
-  "ndssi_mean_chart",
-  "Upstream Control NDSSI Monthly Seasonality by Year",
-  "NDSSI monthly mean"
-));
-print(makeYearOverlayChart(
-  deltaChartFc,
-  "egri_delta_chart",
-  "EGRI Delta Monthly Seasonality by Year",
-  "EGRI delta"
-));
-print(makeYearOverlayChart(
-  deltaChartFc,
-  "ndssi_delta_chart",
-  "NDSSI Delta Monthly Seasonality by Year",
-  "NDSSI delta"
-));
-
-var validPxChart = ui.Chart.feature.groups(
-  monthlyChartFc.filter(ee.Filter.notNull(["valid_px_chart"])),
-  "date",
+var februaryValidPxChart = ui.Chart.feature.groups(
+  februaryStats.filter(ee.Filter.notNull(["valid_px_chart"])),
+  "year_label",
   "valid_px_chart",
   "reach_id"
 ).setChartType("ColumnChart")
   .setOptions({
-    title: "Monthly Valid Pixels Used",
-    hAxis: {title: "Month", slantedText: true, slantedTextAngle: 45},
+    title: "February Valid Pixels Used",
+    hAxis: {title: "Year"},
     vAxis: {title: "Valid pixels"},
-    colors: ["#E53935", "#26A69A"]
+    bar: {groupWidth: "75%"},
+    colors: ["#E53935", "#26A69A"],
+    legend: {position: "top"}
   });
-print(validPxChart);
+print(februaryValidPxChart);
 
 // ================= QUICKLOOKS =================
 var latestMonth = ee.Date(endDate.format("YYYY-MM-01"));
@@ -580,5 +553,17 @@ Export.table.toDrive({
 Export.table.toDrive({
   collection: deltaStats,
   description: "planet_lab_impact_monthly_egri_ndssi_deltas",
+  fileFormat: "CSV"
+});
+
+Export.table.toDrive({
+  collection: februaryStats,
+  description: "planet_lab_impact_february_egri_ndssi",
+  fileFormat: "CSV"
+});
+
+Export.table.toDrive({
+  collection: februaryDeltas,
+  description: "planet_lab_impact_february_egri_ndssi_deltas",
   fileFormat: "CSV"
 });
