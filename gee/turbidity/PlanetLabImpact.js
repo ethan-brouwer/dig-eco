@@ -59,29 +59,29 @@ var planetScenes = [
     label: "RapidEye-5 2011-02-27",
     sensor: "RapidEye-5",
     acquisitionDate: "2011-02-27",
-    srAssetId: "projects/YOUR_PROJECT/assets/ImpactPool_extra_RE_SR_20110227",
-    udmAssetId: "projects/YOUR_PROJECT/assets/ImpactPool_extra_RE_UDM_20110227"
+    srAssetId: "projects/metalminingpersonalcopy/assets/1645310_2011-02-27_RE5_3A_Analytic_SR_clip",
+    udmAssetId: "projects/metalminingpersonalcopy/assets/1645310_2011-02-27_RE5_3A_udm_clip"
   },
   {
     label: "RapidEye-4 2012-02-14",
     sensor: "RapidEye-4",
     acquisitionDate: "2012-02-14",
-    srAssetId: "projects/YOUR_PROJECT/assets/ImpactPool_2_RE_SR_20120214",
-    udmAssetId: "projects/YOUR_PROJECT/assets/ImpactPool_2_RE_UDM_20120214"
+    srAssetId: "projects/metalminingpersonalcopy/assets/1645310_2012-02-14_RE4_3A_Analytic_SR_clip",
+    udmAssetId: "projects/metalminingpersonalcopy/assets/1645310_2012-02-14_RE4_3A_udm_clip"
   },
   {
     label: "RapidEye-4 2012-03-18",
     sensor: "RapidEye-4",
     acquisitionDate: "2012-03-18",
-    srAssetId: "projects/YOUR_PROJECT/assets/ImpactPool_RE_SR_20120318",
-    udmAssetId: "projects/YOUR_PROJECT/assets/ImpactPool_RE_UDM_20120318"
+    srAssetId: "projects/metalminingpersonalcopy/assets/1645310_2012-03-18_RE4_3A_Analytic_SR_clip",
+    udmAssetId: "projects/metalminingpersonalcopy/assets/1645310_2012-03-18_RE4_3A_udm_clip"
   },
   {
     label: "RapidEye-4 2012-10-04",
     sensor: "RapidEye-4",
     acquisitionDate: "2012-10-04",
-    srAssetId: "projects/YOUR_PROJECT/assets/ImpactPool_RE_SR_20121004",
-    udmAssetId: "projects/YOUR_PROJECT/assets/ImpactPool_RE_UDM_20121004"
+    srAssetId: "projects/metalminingpersonalcopy/assets/1645310_2012-10-04_RE4_3A_Analytic_SR_clip",
+    udmAssetId: "projects/metalminingpersonalcopy/assets/1645310_2012-10-04_RE4_3A_udm_clip"
   }
 ];
 
