@@ -33,6 +33,13 @@
 
   RapidEye band order used here:
   B1 = blue, B2 = green, B3 = red, B4 = red edge, B5 = nir
+
+  Red-band turbidity proxy:
+  - Hossain et al. (2021) found Landsat 8 red reflectance strongly correlated
+    with in-situ Tennessee River turbidity.
+  - The transferred equation here is exploratory only:
+    turbidity_proxy = 2677.2 * red_reflectance^1.8562
+  - Interpret it as an optical disturbance proxy, not locally calibrated NTU.
 */
 
 // ================= USER SETTINGS =================
@@ -162,6 +169,8 @@ print("Wet-season month filter", useWetSeasonFilter ? wetSeasonMonths : "OFF");
 print("Min valid pixels", minValidPixels);
 print("NDSSI formula", "(Blue - NIR) / (Blue + NIR)");
 print("EGRI formula", "Green / Red");
+print("Red turbidity proxy", "Red surface reflectance");
+print("Hossain red-band proxy", "2677.2 * pow(red, 1.8562); exploratory, not locally calibrated");
 print("Comparison areas", comparisonAreas);
 
 // ================= INDEX HELPERS =================
@@ -182,7 +191,16 @@ function addIndices(img) {
     }
   ).rename("EGRI");
 
-  return img.addBands([ndssi, egri]);
+  var redTurbidityProxy = img.select("red").rename("RED_TURBIDITY_PROXY");
+
+  var hossainRedTurbidity = img.expression(
+    "2677.2 * pow(RED, 1.8562)",
+    {
+      RED: img.select("red").max(0)
+    }
+  ).rename("HOSSAIN_RED_NTU_PROXY");
+
+  return img.addBands([ndssi, egri, redTurbidityProxy, hossainRedTurbidity]);
 }
 
 function addMonth(img) {
@@ -301,6 +319,18 @@ if (includePlanetLabsTiles) {
       "Planet Labs NDSSI " + scene.label,
       false
     );
+    Map.addLayer(
+      sceneImage.select("RED_TURBIDITY_PROXY"),
+      {min: 0.01, max: 0.18, palette: ["#F7FCF0", "#FEE08B", "#D73027"]},
+      "Planet Labs red turbidity proxy " + scene.label,
+      false
+    );
+    Map.addLayer(
+      sceneImage.select("HOSSAIN_RED_NTU_PROXY"),
+      {min: 0, max: 120, palette: ["#F7FCF0", "#FEE08B", "#D73027", "#7F0000"]},
+      "Planet Labs Hossain red NTU proxy " + scene.label,
+      false
+    );
   });
 }
 
@@ -340,7 +370,9 @@ var monthlyStats = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
       valid_px: 0,
       qa_flag: "no_images",
       ndssi_mean: noDataValue,
-      egri_mean: noDataValue
+      egri_mean: noDataValue,
+      red_turbidity_proxy_mean: noDataValue,
+      hossain_red_ntu_proxy_mean: noDataValue
     });
 
     return ee.Feature(ee.Algorithms.If(imageCount.gt(0), (function() {
@@ -358,7 +390,12 @@ var monthlyStats = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
       }).get("red"));
 
       var stats = monthImg
-        .select(["NDSSI", "EGRI"])
+        .select([
+          "NDSSI",
+          "EGRI",
+          "RED_TURBIDITY_PROXY",
+          "HOSSAIN_RED_NTU_PROXY"
+        ])
         .updateMask(validMask)
         .reduceRegion({
           reducer: ee.Reducer.mean(),
@@ -384,7 +421,17 @@ var monthlyStats = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
         valid_px: validPx,
         qa_flag: ee.Algorithms.If(hasValidData, "valid", "low_valid_px"),
         ndssi_mean: ee.Algorithms.If(hasValidData, safeNumber(stats.get("NDSSI")), noDataValue),
-        egri_mean: ee.Algorithms.If(hasValidData, safeNumber(stats.get("EGRI")), noDataValue)
+        egri_mean: ee.Algorithms.If(hasValidData, safeNumber(stats.get("EGRI")), noDataValue),
+        red_turbidity_proxy_mean: ee.Algorithms.If(
+          hasValidData,
+          safeNumber(stats.get("RED_TURBIDITY_PROXY")),
+          noDataValue
+        ),
+        hossain_red_ntu_proxy_mean: ee.Algorithms.If(
+          hasValidData,
+          safeNumber(stats.get("HOSSAIN_RED_NTU_PROXY")),
+          noDataValue
+        )
       });
     })(), emptyFeature));
   });
@@ -415,12 +462,22 @@ var deltaStats = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
   var impact = ee.Feature(ee.Algorithms.If(
     hasBoth,
     impactFc.first(),
-    ee.Feature(null, {egri_mean: noDataValue, ndssi_mean: noDataValue})
+    ee.Feature(null, {
+      egri_mean: noDataValue,
+      ndssi_mean: noDataValue,
+      red_turbidity_proxy_mean: noDataValue,
+      hossain_red_ntu_proxy_mean: noDataValue
+    })
   ));
   var control = ee.Feature(ee.Algorithms.If(
     hasBoth,
     controlFc.first(),
-    ee.Feature(null, {egri_mean: noDataValue, ndssi_mean: noDataValue})
+    ee.Feature(null, {
+      egri_mean: noDataValue,
+      ndssi_mean: noDataValue,
+      red_turbidity_proxy_mean: noDataValue,
+      hossain_red_ntu_proxy_mean: noDataValue
+    })
   ));
 
   return ee.Feature(null, {
@@ -444,6 +501,30 @@ var deltaStats = ee.FeatureCollection(monthlyStarts.map(function(mStart) {
       hasBoth,
       ee.Number(impact.get("ndssi_mean")).subtract(ee.Number(control.get("ndssi_mean"))),
       noDataValue
+    ),
+    red_proxy_impact: ee.Algorithms.If(hasBoth, impact.get("red_turbidity_proxy_mean"), noDataValue),
+    red_proxy_control: ee.Algorithms.If(hasBoth, control.get("red_turbidity_proxy_mean"), noDataValue),
+    red_proxy_delta: ee.Algorithms.If(
+      hasBoth,
+      ee.Number(impact.get("red_turbidity_proxy_mean"))
+        .subtract(ee.Number(control.get("red_turbidity_proxy_mean"))),
+      noDataValue
+    ),
+    hossain_red_ntu_impact: ee.Algorithms.If(
+      hasBoth,
+      impact.get("hossain_red_ntu_proxy_mean"),
+      noDataValue
+    ),
+    hossain_red_ntu_control: ee.Algorithms.If(
+      hasBoth,
+      control.get("hossain_red_ntu_proxy_mean"),
+      noDataValue
+    ),
+    hossain_red_ntu_delta: ee.Algorithms.If(
+      hasBoth,
+      ee.Number(impact.get("hossain_red_ntu_proxy_mean"))
+        .subtract(ee.Number(control.get("hossain_red_ntu_proxy_mean"))),
+      noDataValue
     )
   });
 })).sort("system:time_start");
@@ -453,12 +534,16 @@ var pairedDeltaStats = deltaStats.filter(ee.Filter.eq("qa_flag", "paired_valid")
 print("Monthly impact-minus-control deltas", deltaStats);
 print("Largest positive EGRI delta months", pairedDeltaStats.sort("egri_delta", false).limit(15));
 print("Largest positive NDSSI delta months", pairedDeltaStats.sort("ndssi_delta", false).limit(15));
+print("Largest positive red-proxy delta months", pairedDeltaStats.sort("red_proxy_delta", false).limit(15));
+print("Largest positive Hossain-proxy delta months", pairedDeltaStats.sort("hossain_red_ntu_delta", false).limit(15));
 
 // ================= CHARTS =================
 var monthlyChartFc = monthlyStats.map(function(f) {
   return f.set({
     egri_mean_chart: cleanChartValue(f, "egri_mean"),
     ndssi_mean_chart: cleanChartValue(f, "ndssi_mean"),
+    red_turbidity_proxy_chart: cleanChartValue(f, "red_turbidity_proxy_mean"),
+    hossain_red_ntu_proxy_chart: cleanChartValue(f, "hossain_red_ntu_proxy_mean"),
     valid_px_chart: ee.Algorithms.If(ee.Number(f.get("valid_px")).gt(0), f.get("valid_px"), null)
   });
 });
@@ -466,7 +551,9 @@ var monthlyChartFc = monthlyStats.map(function(f) {
 var deltaChartFc = deltaStats.map(function(f) {
   return f.set({
     egri_delta_chart: cleanChartValue(f, "egri_delta"),
-    ndssi_delta_chart: cleanChartValue(f, "ndssi_delta")
+    ndssi_delta_chart: cleanChartValue(f, "ndssi_delta"),
+    red_proxy_delta_chart: cleanChartValue(f, "red_proxy_delta"),
+    hossain_red_ntu_delta_chart: cleanChartValue(f, "hossain_red_ntu_delta")
   });
 });
 
@@ -513,6 +600,38 @@ var selectedMonthNdssiChart = ui.Chart.feature.groups(
   });
 print(selectedMonthNdssiChart);
 
+var selectedMonthRedProxyChart = ui.Chart.feature.groups(
+  selectedMonthStats.filter(ee.Filter.notNull(["red_turbidity_proxy_chart"])),
+  "date",
+  "red_turbidity_proxy_chart",
+  "reach_id"
+).setChartType("ColumnChart")
+  .setOptions({
+    title: "Selected-Month Red Reflectance Turbidity Proxy by Date",
+    hAxis: {title: "Date", slantedText: true, slantedTextAngle: 45},
+    vAxis: {title: "Mean red reflectance"},
+    bar: {groupWidth: "75%"},
+    colors: ["#E53935", "#26A69A"],
+    legend: {position: "top"}
+  });
+print(selectedMonthRedProxyChart);
+
+var selectedMonthHossainProxyChart = ui.Chart.feature.groups(
+  selectedMonthStats.filter(ee.Filter.notNull(["hossain_red_ntu_proxy_chart"])),
+  "date",
+  "hossain_red_ntu_proxy_chart",
+  "reach_id"
+).setChartType("ColumnChart")
+  .setOptions({
+    title: "Selected-Month Hossain Red-Band NTU Proxy by Date",
+    hAxis: {title: "Date", slantedText: true, slantedTextAngle: 45},
+    vAxis: {title: "Proxy turbidity (NTU, not locally calibrated)"},
+    bar: {groupWidth: "75%"},
+    colors: ["#E53935", "#26A69A"],
+    legend: {position: "top"}
+  });
+print(selectedMonthHossainProxyChart);
+
 var selectedMonthEgriDeltaChart = ui.Chart.feature.byFeature(
   selectedMonthDeltas.filter(ee.Filter.notNull(["egri_delta_chart"])),
   "date",
@@ -540,6 +659,34 @@ var selectedMonthNdssiDeltaChart = ui.Chart.feature.byFeature(
     colors: ["#3949AB"]
   });
 print(selectedMonthNdssiDeltaChart);
+
+var selectedMonthRedProxyDeltaChart = ui.Chart.feature.byFeature(
+  selectedMonthDeltas.filter(ee.Filter.notNull(["red_proxy_delta_chart"])),
+  "date",
+  ["red_proxy_delta_chart"]
+).setChartType("ColumnChart")
+  .setOptions({
+    title: "Selected-Month Red Reflectance Delta: impact_pool - upstream_control",
+    hAxis: {title: "Date", slantedText: true, slantedTextAngle: 45},
+    vAxis: {title: "Red reflectance delta"},
+    bar: {groupWidth: "75%"},
+    colors: ["#D73027"]
+  });
+print(selectedMonthRedProxyDeltaChart);
+
+var selectedMonthHossainProxyDeltaChart = ui.Chart.feature.byFeature(
+  selectedMonthDeltas.filter(ee.Filter.notNull(["hossain_red_ntu_delta_chart"])),
+  "date",
+  ["hossain_red_ntu_delta_chart"]
+).setChartType("ColumnChart")
+  .setOptions({
+    title: "Selected-Month Hossain Red-Band Proxy Delta: impact_pool - upstream_control",
+    hAxis: {title: "Date", slantedText: true, slantedTextAngle: 45},
+    vAxis: {title: "Proxy NTU delta"},
+    bar: {groupWidth: "75%"},
+    colors: ["#7F0000"]
+  });
+print(selectedMonthHossainProxyDeltaChart);
 
 var selectedMonthValidPxChart = ui.Chart.feature.groups(
   selectedMonthStats.filter(ee.Filter.notNull(["valid_px_chart"])),
@@ -582,6 +729,18 @@ Map.addLayer(
   latestPreview.select("NDSSI"),
   {min: -0.8, max: 0.4, palette: ["#54278F", "#2B8CBE", "#F7FCF0"]},
   "Latest Sentinel-2 monthly NDSSI",
+  false
+);
+Map.addLayer(
+  latestPreview.select("RED_TURBIDITY_PROXY"),
+  {min: 0.01, max: 0.18, palette: ["#F7FCF0", "#FEE08B", "#D73027"]},
+  "Latest Sentinel-2 red turbidity proxy",
+  false
+);
+Map.addLayer(
+  latestPreview.select("HOSSAIN_RED_NTU_PROXY"),
+  {min: 0, max: 120, palette: ["#F7FCF0", "#FEE08B", "#D73027", "#7F0000"]},
+  "Latest Sentinel-2 Hossain red NTU proxy",
   false
 );
 
