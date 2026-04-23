@@ -521,6 +521,19 @@ var combinedFirstImageSignalStats = ee.FeatureCollection(monthSummaries.map(func
     });
   });
 })).flatten();
+var planetSceneSignalStats = ee.FeatureCollection(activePlanetScenes.map(function(scene) {
+  var sceneImage = makePlanetLabsImage(scene).clip(aoi);
+  var sceneLabel = scene.label;
+
+  return polygons.map(function(feature) {
+    return summarizePolygonForSingleImage(feature, sceneImage, sceneLabel, ee.Number(1))
+      .set({
+        scene_label: sceneLabel,
+        acquisition_date: scene.acquisitionDate,
+        sensor_label: scene.sensor
+      });
+  }).filter(ee.Filter.gt("valid_px", 0));
+})).flatten();
 
 monthSummaries.forEach(function(summary, idx) {
   Map.addLayer(
@@ -649,6 +662,50 @@ print(ui.Chart.feature.groups(
   lineWidth: 2,
   pointSize: 5,
   colors: ["#E65100", "#880E4F"]
+}));
+
+print("Planet Labs per-scene downstream signal summary", planetSceneSignalStats);
+
+print(ui.Chart.feature.groups(
+  planetSceneSignalStats,
+  "distance_m",
+  "egri_mean",
+  "scene_label"
+).setChartType("LineChart").setOptions({
+  title: "Planet Labs EGRI by Distance Downstream",
+  hAxis: {title: "Distance from impact pool (m)"},
+  vAxis: {title: "Mean EGRI"},
+  lineWidth: 2,
+  pointSize: 5,
+  colors: ["#1B5E20", "#2E7D32", "#558B2F", "#33691E"]
+}));
+
+print(ui.Chart.feature.groups(
+  planetSceneSignalStats,
+  "distance_m",
+  "ndssi_mean",
+  "scene_label"
+).setChartType("LineChart").setOptions({
+  title: "Planet Labs NDSSI by Distance Downstream",
+  hAxis: {title: "Distance from impact pool (m)"},
+  vAxis: {title: "Mean NDSSI"},
+  lineWidth: 2,
+  pointSize: 5,
+  colors: ["#0D47A1", "#1565C0", "#3949AB", "#6A1B9A"]
+}));
+
+print(ui.Chart.feature.groups(
+  planetSceneSignalStats,
+  "distance_m",
+  "hossain_red_ntu_proxy_mean",
+  "scene_label"
+).setChartType("LineChart").setOptions({
+  title: "Planet Labs Hossain Red-Band Proxy by Distance Downstream",
+  hAxis: {title: "Distance from impact pool (m)"},
+  vAxis: {title: "Exploratory NTU proxy"},
+  lineWidth: 2,
+  pointSize: 5,
+  colors: ["#BF360C", "#E65100", "#F57C00", "#AD1457"]
 }));
 
 activePlanetScenes.forEach(function(scene, index) {
