@@ -51,10 +51,10 @@ var analysisMonths = [
   {label: "2024-01", title: "January 2024", start: ee.Date("2024-01-01")}
 ];
 
-var includePlanetLabsTiles = false;
+var includePlanetLabsTiles = true;
 var planetScenes = [
   {
-    enabled: false,
+    enabled: true,
     label: "Rio Santa Rosa downstream RapidEye-2 2011-02-24",
     sensor: "RapidEye-2",
     acquisitionDate: "2011-02-24",
@@ -69,22 +69,22 @@ var planetScenes = [
     bandIndexes: [0, 1, 2, 4]
   },
   {
-    enabled: false,
+    enabled: true,
     label: "Rio Santa Rosa downstream RapidEye-4 2012-02-14",
     sensor: "RapidEye-4",
     acquisitionDate: "2012-02-14",
     srAssetIds: [
-      "projects/metalminingpersonalcopy/assets/1645310_2012-02-14_RE4_3A_Analytic_SR_clip",
+      "projects/metalminingpersonalcopy/assets/1645310_2012-02-14_RE4_3A_Analytic_SR_clip_2",
       "projects/metalminingpersonalcopy/assets/1645311_2012-02-14_RE4_3A_Analytic_SR_clip"
     ],
     udmAssetIds: [
-      "projects/metalminingpersonalcopy/assets/1645310_2012-02-14_RE4_3A_udm_clip",
+      "projects/metalminingpersonalcopy/assets/1645310_2012-02-14_RE4_3A_udm_clip_2",
       "projects/metalminingpersonalcopy/assets/1645311_2012-02-14_RE4_3A_udm_clip"
     ],
     bandIndexes: [0, 1, 2, 4]
   },
   {
-    enabled: false,
+    enabled: true,
     label: "Rio Santa Rosa downstream RapidEye-2 2012-02-26",
     sensor: "RapidEye-2",
     acquisitionDate: "2012-02-26",
@@ -429,6 +429,20 @@ function normalizeByImpactPool(fc, groupProperty, valueProperty, outputProperty)
   return normalized.filter(ee.Filter.notNull([outputProperty]));
 }
 
+function attachChartSeries(fc, groupProperty) {
+  return fc.map(function(feature) {
+    feature = ee.Feature(feature);
+    var groupLabel = ee.String(feature.get(groupProperty));
+    var chartSeries = ee.String(ee.Algorithms.If(
+      ee.String(feature.get("polygon_id")).compareTo("upstream_control").eq(0),
+      groupLabel.cat(" upstream"),
+      groupLabel
+    ));
+
+    return feature.set("chart_series", chartSeries);
+  });
+}
+
 // ================= INPUTS =================
 var polygons = ee.FeatureCollection([
   ee.Feature(toGeometry(upstream_control), {
@@ -625,6 +639,17 @@ var normalizedPlanetHossainStats = normalizeByImpactPool(
   "hossain_red_ntu_proxy_mean",
   "hossain_rel_impact_pool"
 );
+var chartMonthlyStats = attachChartSeries(combinedValidSignalStats, "month_label");
+var chartSecondImageStats = attachChartSeries(combinedFirstImageSignalStats, "image_label");
+var chartPlanetSceneStats = attachChartSeries(planetSceneSignalStats, "scene_label");
+var chartNormalizedMonthlyEgriStats = attachChartSeries(normalizedMonthlyEgriStats, "month_label");
+var chartNormalizedMonthlyNdssiStats = attachChartSeries(normalizedMonthlyNdssiStats, "month_label");
+var chartNormalizedMonthlyHossainStats = attachChartSeries(normalizedMonthlyHossainStats, "month_label");
+var chartNormalizedSecondImageEgriStats = attachChartSeries(normalizedSecondImageEgriStats, "image_label");
+var chartNormalizedSecondImageNdssiStats = attachChartSeries(normalizedSecondImageNdssiStats, "image_label");
+var chartNormalizedPlanetEgriStats = attachChartSeries(normalizedPlanetEgriStats, "scene_label");
+var chartNormalizedPlanetNdssiStats = attachChartSeries(normalizedPlanetNdssiStats, "scene_label");
+var chartNormalizedPlanetHossainStats = attachChartSeries(normalizedPlanetHossainStats, "scene_label");
 
 monthSummaries.forEach(function(summary, idx) {
   Map.addLayer(
@@ -672,144 +697,155 @@ monthSummaries.forEach(function(summary, idx) {
 });
 
 print(ui.Chart.feature.groups(
-  combinedValidSignalStats,
+  chartMonthlyStats,
   "distance_m",
   "egri_mean",
-  "month_label"
-).setChartType("ScatterChart").setOptions({
+  "chart_series"
+).setChartType("LineChart").setOptions({
   title: "EGRI by Distance Downstream",
   hAxis: {title: "Distance from impact pool (m)"},
   vAxis: {title: "Mean EGRI"},
+  lineWidth: 2,
   pointSize: 5,
   colors: ["#2E7D32", "#C62828"]
 }));
 
 print(ui.Chart.feature.groups(
-  combinedValidSignalStats,
+  chartMonthlyStats,
   "distance_m",
   "ndssi_mean",
-  "month_label"
-).setChartType("ScatterChart").setOptions({
+  "chart_series"
+).setChartType("LineChart").setOptions({
   title: "NDSSI by Distance Downstream",
   hAxis: {title: "Distance from impact pool (m)"},
   vAxis: {title: "Mean NDSSI"},
+  lineWidth: 2,
   pointSize: 5,
   colors: ["#1565C0", "#6A1B9A"]
 }));
 
 print(ui.Chart.feature.groups(
-  combinedFirstImageSignalStats,
+  chartSecondImageStats,
   "distance_m",
   "egri_mean",
-  "image_label"
-).setChartType("ScatterChart").setOptions({
+  "chart_series"
+).setChartType("LineChart").setOptions({
   title: "EGRI by Distance Downstream (Second Image of Month)",
   hAxis: {title: "Distance from impact pool (m)"},
   vAxis: {title: "Mean EGRI"},
+  lineWidth: 2,
   pointSize: 5,
   colors: ["#1B5E20", "#B71C1C"]
 }));
 
 print(ui.Chart.feature.groups(
-  combinedFirstImageSignalStats,
+  chartSecondImageStats,
   "distance_m",
   "ndssi_mean",
-  "image_label"
-).setChartType("ScatterChart").setOptions({
+  "chart_series"
+).setChartType("LineChart").setOptions({
   title: "NDSSI by Distance Downstream (Second Image of Month)",
   hAxis: {title: "Distance from impact pool (m)"},
   vAxis: {title: "Mean NDSSI"},
+  lineWidth: 2,
   pointSize: 5,
   colors: ["#0D47A1", "#4A148C"]
 }));
 
 print(ui.Chart.feature.groups(
-  combinedValidSignalStats,
+  chartMonthlyStats,
   "distance_m",
   "red_turbidity_proxy_mean",
-  "month_label"
-).setChartType("ScatterChart").setOptions({
+  "chart_series"
+).setChartType("LineChart").setOptions({
   title: "Red Turbidity Proxy by Distance Downstream",
   hAxis: {title: "Distance from impact pool (m)"},
   vAxis: {title: "Mean red reflectance"},
+  lineWidth: 2,
   pointSize: 5,
   colors: ["#EF6C00", "#AD1457"]
 }));
 
 print(ui.Chart.feature.groups(
-  combinedValidSignalStats,
+  chartMonthlyStats,
   "distance_m",
   "hossain_red_ntu_proxy_mean",
-  "month_label"
-).setChartType("ScatterChart").setOptions({
+  "chart_series"
+).setChartType("LineChart").setOptions({
   title: "Hossain Red-Band NTU Proxy by Distance Downstream",
   hAxis: {title: "Distance from impact pool (m)"},
   vAxis: {title: "Exploratory NTU proxy"},
+  lineWidth: 2,
   pointSize: 5,
   colors: ["#E65100", "#880E4F"]
 }));
 
 print(ui.Chart.feature.groups(
-  normalizedMonthlyEgriStats,
+  chartNormalizedMonthlyEgriStats,
   "distance_m",
   "egri_rel_impact_pool",
-  "month_label"
-).setChartType("ScatterChart").setOptions({
+  "chart_series"
+).setChartType("LineChart").setOptions({
   title: "Relative EGRI by Distance (impact_pool = 1)",
   hAxis: {title: "Distance from impact pool (m)"},
   vAxis: {title: "EGRI / impact_pool EGRI"},
+  lineWidth: 2,
   pointSize: 5,
   colors: ["#2E7D32", "#C62828"]
 }));
 
 print(ui.Chart.feature.groups(
-  normalizedMonthlyNdssiStats,
+  chartNormalizedMonthlyNdssiStats,
   "distance_m",
   "ndssi_rel_impact_pool",
-  "month_label"
-).setChartType("ScatterChart").setOptions({
+  "chart_series"
+).setChartType("LineChart").setOptions({
   title: "Relative NDSSI by Distance (impact_pool = 1)",
   hAxis: {title: "Distance from impact pool (m)"},
   vAxis: {title: "NDSSI / impact_pool NDSSI"},
+  lineWidth: 2,
   pointSize: 5,
   colors: ["#1565C0", "#6A1B9A"]
 }));
 
 print(ui.Chart.feature.groups(
-  normalizedMonthlyHossainStats,
+  chartNormalizedMonthlyHossainStats,
   "distance_m",
   "hossain_rel_impact_pool",
-  "month_label"
-).setChartType("ScatterChart").setOptions({
+  "chart_series"
+).setChartType("LineChart").setOptions({
   title: "Relative Hossain Proxy by Distance (impact_pool = 1)",
   hAxis: {title: "Distance from impact pool (m)"},
   vAxis: {title: "Hossain proxy / impact_pool proxy"},
+  lineWidth: 2,
   pointSize: 5,
   colors: ["#E65100", "#880E4F"]
 }));
 
 print(ui.Chart.feature.groups(
-  normalizedSecondImageEgriStats,
+  chartNormalizedSecondImageEgriStats,
   "distance_m",
   "egri_rel_impact_pool",
-  "image_label"
-).setChartType("ScatterChart").setOptions({
+  "chart_series"
+).setChartType("LineChart").setOptions({
   title: "Relative EGRI by Distance (Second Image, impact_pool = 1)",
   hAxis: {title: "Distance from impact pool (m)"},
   vAxis: {title: "EGRI / impact_pool EGRI"},
+  lineWidth: 2,
   pointSize: 5,
   colors: ["#1B5E20", "#B71C1C"]
 }));
 
 print(ui.Chart.feature.groups(
-  normalizedSecondImageNdssiStats,
+  chartNormalizedSecondImageNdssiStats,
   "distance_m",
   "ndssi_rel_impact_pool",
-  "image_label"
-).setChartType("ScatterChart").setOptions({
+  "chart_series"
+).setChartType("LineChart").setOptions({
   title: "Relative NDSSI by Distance (Second Image, impact_pool = 1)",
   hAxis: {title: "Distance from impact pool (m)"},
   vAxis: {title: "NDSSI / impact_pool NDSSI"},
+  lineWidth: 2,
   pointSize: 5,
   colors: ["#0D47A1", "#4A148C"]
 }));
@@ -817,79 +853,85 @@ print(ui.Chart.feature.groups(
 print("Planet Labs per-scene downstream signal summary", planetSceneSignalStats);
 
 print(ui.Chart.feature.groups(
-  planetSceneSignalStats,
+  chartPlanetSceneStats,
   "distance_m",
   "egri_mean",
-  "scene_label"
-).setChartType("ScatterChart").setOptions({
+  "chart_series"
+).setChartType("LineChart").setOptions({
   title: "Planet Labs EGRI by Distance Downstream",
   hAxis: {title: "Distance from impact pool (m)"},
   vAxis: {title: "Mean EGRI"},
+  lineWidth: 2,
   pointSize: 5,
   colors: ["#1B5E20", "#2E7D32", "#558B2F", "#33691E"]
 }));
 
 print(ui.Chart.feature.groups(
-  planetSceneSignalStats,
+  chartPlanetSceneStats,
   "distance_m",
   "ndssi_mean",
-  "scene_label"
-).setChartType("ScatterChart").setOptions({
+  "chart_series"
+).setChartType("LineChart").setOptions({
   title: "Planet Labs NDSSI by Distance Downstream",
   hAxis: {title: "Distance from impact pool (m)"},
   vAxis: {title: "Mean NDSSI"},
+  lineWidth: 2,
   pointSize: 5,
   colors: ["#0D47A1", "#1565C0", "#3949AB", "#6A1B9A"]
 }));
 
 print(ui.Chart.feature.groups(
-  planetSceneSignalStats,
+  chartPlanetSceneStats,
   "distance_m",
   "hossain_red_ntu_proxy_mean",
-  "scene_label"
-).setChartType("ScatterChart").setOptions({
+  "chart_series"
+).setChartType("LineChart").setOptions({
   title: "Planet Labs Hossain Red-Band Proxy by Distance Downstream",
   hAxis: {title: "Distance from impact pool (m)"},
   vAxis: {title: "Exploratory NTU proxy"},
+  lineWidth: 2,
   pointSize: 5,
   colors: ["#BF360C", "#E65100", "#F57C00", "#AD1457"]
 }));
 
 print(ui.Chart.feature.groups(
-  normalizedPlanetEgriStats,
+  chartNormalizedPlanetEgriStats,
   "distance_m",
   "egri_rel_impact_pool",
-  "scene_label"
-).setChartType("ScatterChart").setOptions({
+  "chart_series"
+).setChartType("LineChart").setOptions({
   title: "Planet Labs Relative EGRI by Distance (impact_pool = 1)",
   hAxis: {title: "Distance from impact pool (m)"},
   vAxis: {title: "EGRI / impact_pool EGRI"},
+  lineWidth: 2,
   pointSize: 5,
   colors: ["#1B5E20", "#2E7D32", "#558B2F", "#33691E"]
 }));
 
 print(ui.Chart.feature.groups(
-  normalizedPlanetNdssiStats,
+  chartNormalizedPlanetNdssiStats,
   "distance_m",
   "ndssi_rel_impact_pool",
-  "scene_label"
-).setChartType("ScatterChart").setOptions({
+  "chart_series"
+).setChartType("LineChart").setOptions({
   title: "Planet Labs Relative NDSSI by Distance (impact_pool = 1)",
   hAxis: {title: "Distance from impact pool (m)"},
   vAxis: {title: "NDSSI / impact_pool NDSSI"},
+  lineWidth: 2,
   pointSize: 5,
   colors: ["#0D47A1", "#1565C0", "#3949AB", "#6A1B9A"]
 }));
 
 print(ui.Chart.feature.groups(
-  normalizedPlanetHossainStats,
+  chartNormalizedPlanetHossainStats,
   "distance_m",
   "hossain_rel_impact_pool",
-  "scene_label"
-).setChartType("ScatterChart").setOptions({
+  "chart_series"
+).setChartType("LineChart").setOptions({
   title: "Planet Labs Relative Hossain Proxy by Distance (impact_pool = 1)",
   hAxis: {title: "Distance from impact pool (m)"},
   vAxis: {title: "Hossain proxy / impact_pool proxy"},
+  lineWidth: 2,
   pointSize: 5,
   colors: ["#BF360C", "#E65100", "#F57C00", "#AD1457"]
 }));
