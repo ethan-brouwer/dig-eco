@@ -20,8 +20,18 @@
   PLANET LABS ASSET SETUP
   1. Upload each Planet Labs surface reflectance GeoTIFF as an Earth Engine image.
   2. If available, upload each matching UDM / usable-data-mask GeoTIFF as an image.
-  3. Replace the srAssetId / udmAssetId placeholders in planetScenes below.
-  4. Set enabled: true for scenes that have finished uploading.
+  3. For split scenes, upload each tile separately and list them in srAssetIds / udmAssetIds.
+  4. Replace the asset placeholders in planetScenes below.
+  5. Set enabled: true for scenes that have finished uploading.
+
+  Current Rio Santa Rosa downstream re-orthotile package found locally:
+  - 2011-02-24 RapidEye-2 tiles: 1645310, 1645311
+  - 2012-02-14 RapidEye-4 tiles: 1645310, 1645311
+  - 2012-02-26 RapidEye-2 tiles: 1645310, 1645311
+
+  The `RioSantaRosaDownstreamPL_rescene_basic_analytic` package is a separate
+  REScene/basic analytic delivery with per-band files. This script is prepared
+  for the re-orthotile surface reflectance assets first.
 
   Band index presets:
   - RapidEye 5-band SR:       [0, 1, 2, 4] = blue, green, red, nir
@@ -43,38 +53,60 @@ var includePlanetLabsTiles = false;
 var planetScenes = [
   {
     enabled: false,
-    label: "Planet downstream scene 1",
-    sensor: "Planet Labs",
-    acquisitionDate: "YYYY-MM-DD",
-    srAssetId: "projects/YOUR_PROJECT/assets/Downstream_Planet_SR_scene_1",
-    udmAssetId: "projects/YOUR_PROJECT/assets/Downstream_Planet_UDM_scene_1",
-    bandIndexes: [0, 1, 2, 3]
+    label: "Rio Santa Rosa downstream RapidEye-2 2011-02-24",
+    sensor: "RapidEye-2",
+    acquisitionDate: "2011-02-24",
+    srAssetIds: [
+      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_SR_20110224_1645310",
+      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_SR_20110224_1645311"
+    ],
+    udmAssetIds: [
+      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_UDM_20110224_1645310",
+      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_UDM_20110224_1645311"
+    ],
+    bandIndexes: [0, 1, 2, 4]
   },
   {
     enabled: false,
-    label: "Planet downstream scene 2",
-    sensor: "Planet Labs",
-    acquisitionDate: "YYYY-MM-DD",
-    srAssetId: "projects/YOUR_PROJECT/assets/Downstream_Planet_SR_scene_2",
-    udmAssetId: "projects/YOUR_PROJECT/assets/Downstream_Planet_UDM_scene_2",
-    bandIndexes: [0, 1, 2, 3]
+    label: "Rio Santa Rosa downstream RapidEye-4 2012-02-14",
+    sensor: "RapidEye-4",
+    acquisitionDate: "2012-02-14",
+    srAssetIds: [
+      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_SR_20120214_1645310",
+      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_SR_20120214_1645311"
+    ],
+    udmAssetIds: [
+      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_UDM_20120214_1645310",
+      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_UDM_20120214_1645311"
+    ],
+    bandIndexes: [0, 1, 2, 4]
   },
   {
     enabled: false,
-    label: "Planet downstream scene 3",
-    sensor: "Planet Labs",
-    acquisitionDate: "YYYY-MM-DD",
-    srAssetId: "projects/YOUR_PROJECT/assets/Downstream_Planet_SR_scene_3",
-    udmAssetId: "projects/YOUR_PROJECT/assets/Downstream_Planet_UDM_scene_3",
-    bandIndexes: [0, 1, 2, 3]
+    label: "Rio Santa Rosa downstream RapidEye-2 2012-02-26",
+    sensor: "RapidEye-2",
+    acquisitionDate: "2012-02-26",
+    srAssetIds: [
+      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_SR_20120226_1645310",
+      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_SR_20120226_1645311"
+    ],
+    udmAssetIds: [
+      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_UDM_20120226_1645310",
+      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_UDM_20120226_1645311"
+    ],
+    bandIndexes: [0, 1, 2, 4]
   },
   {
     enabled: false,
-    label: "Planet downstream scene 4",
+    label: "Optional extra Planet scene",
     sensor: "Planet Labs",
     acquisitionDate: "YYYY-MM-DD",
-    srAssetId: "projects/YOUR_PROJECT/assets/Downstream_Planet_SR_scene_4",
-    udmAssetId: "projects/YOUR_PROJECT/assets/Downstream_Planet_UDM_scene_4",
+    srAssetIds: [
+      "projects/YOUR_PROJECT/assets/Downstream_Planet_SR_scene_4"
+    ],
+    udmAssetIds: [
+      "projects/YOUR_PROJECT/assets/Downstream_Planet_UDM_scene_4"
+    ],
     bandIndexes: [0, 1, 2, 3]
   }
 ];
@@ -170,11 +202,25 @@ function makeEmptyAnalysisImage() {
     .selfMask();
 }
 
+function toJsArray(value) {
+  if (!value) {
+    return [];
+  }
+  return Array.isArray(value) ? value : [value];
+}
+
 function makePlanetLabsImage(scene) {
   var sceneDate = ee.Date(scene.acquisitionDate);
-  var sr = ee.Image(scene.srAssetId)
-    .select(scene.bandIndexes, ["blue", "green", "red", "nir"])
-    .multiply(0.0001);
+  var srAssetIds = toJsArray(scene.srAssetIds || scene.srAssetId);
+  var udmAssetIds = toJsArray(scene.udmAssetIds || scene.udmAssetId);
+
+  var srCollection = ee.ImageCollection(srAssetIds.map(function(assetId) {
+    return ee.Image(assetId)
+      .select(scene.bandIndexes, ["blue", "green", "red", "nir"])
+      .multiply(0.0001);
+  }));
+
+  var sr = srCollection.mosaic();
 
   var positiveReflectanceMask = sr.select("blue").gt(0)
     .and(sr.select("green").gt(0))
@@ -182,8 +228,11 @@ function makePlanetLabsImage(scene) {
     .and(sr.select("nir").gt(0));
 
   var validMask = positiveReflectanceMask;
-  if (scene.udmAssetId) {
-    var udm = ee.Image(scene.udmAssetId).select([0], ["UDM"]);
+  if (udmAssetIds.length > 0) {
+    var udmCollection = ee.ImageCollection(udmAssetIds.map(function(assetId) {
+      return ee.Image(assetId).select([0], ["UDM"]);
+    }));
+    var udm = udmCollection.mosaic();
     validMask = validMask.and(udm.eq(0));
   }
 
@@ -194,8 +243,9 @@ function makePlanetLabsImage(scene) {
       scene_label: scene.label,
       sensor: scene.sensor,
       source: "Planet Labs uploaded asset",
-      sr_asset_id: scene.srAssetId,
-      udm_asset_id: scene.udmAssetId,
+      sr_asset_ids: srAssetIds.join(","),
+      udm_asset_ids: udmAssetIds.join(","),
+      tile_count: srAssetIds.length,
       analysis_scale_m: planetScaleMeters
     });
 }
