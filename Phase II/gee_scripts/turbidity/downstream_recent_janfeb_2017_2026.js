@@ -2,7 +2,8 @@
   FILE: Phase II/gee_scripts/turbidity/downstream_recent_janfeb_2017_2026.js
   PURPOSE: Analyze January-February downstream optical water-quality proxies
            for every year from 2017 through 2026 using recent Sentinel-2
-           imagery and the existing downstream polygons.
+           imagery and the existing upstream/downstream polygons, with CSV
+           export as the primary output for downstream analysis in Jupyter.
 
   GEE IMPORTS REQUIRED
   - upstream_control
@@ -30,6 +31,7 @@ var upstreamReferenceDistanceMeters = -500;
 var minValidPixels = 3;
 var exportCsvTables = true;
 var exportFolder = "EarthEngine";
+var showPreviewCharts = false;
 
 // ================= HELPERS =================
 function toGeometry(obj) {
@@ -337,6 +339,7 @@ print("Analysis years", analysisStartYear + " to " + analysisEndYear);
 print("Analysis months", analysisMonths);
 print("Upstream reference distance (m)", upstreamReferenceDistanceMeters);
 print("Minimum valid pixels", minValidPixels);
+print("Show preview charts", showPreviewCharts);
 print("NDSSI formula", "(Blue - NIR) / (Blue + NIR)");
 print("EGRI formula", "Green / Red");
 print("Red turbidity proxy", "Red surface reflectance");
@@ -396,49 +399,65 @@ var analysisConfigs = buildAnalysisConfigs(analysisStartYear, analysisEndYear, a
 print("Analysis windows", analysisConfigs);
 
 var monthSummaries = analysisConfigs.map(buildMonthSummary);
-var combinedValidSignalStats = ee.FeatureCollection(monthSummaries.map(function(summary) {
-  return summary.validSignalStats;
+var combinedMonthlyStats = ee.FeatureCollection(monthSummaries.map(function(summary) {
+  return summary.polygonStats;
 })).flatten();
 
 var normalizedMonthlyEgriStats = normalizeByImpactPool(
-  combinedValidSignalStats, "month_label", "egri_mean", "egri_rel_impact_pool"
+  combinedMonthlyStats, "month_label", "egri_mean", "egri_rel_impact_pool"
 );
 var normalizedMonthlyNdssiStats = normalizeByImpactPool(
-  combinedValidSignalStats, "month_label", "ndssi_mean", "ndssi_rel_impact_pool"
+  combinedMonthlyStats, "month_label", "ndssi_mean", "ndssi_rel_impact_pool"
 );
 var normalizedMonthlyHossainStats = normalizeByImpactPool(
-  combinedValidSignalStats, "month_label", "hossain_red_ntu_proxy_mean", "hossain_rel_impact_pool"
+  combinedMonthlyStats, "month_label", "hossain_red_ntu_proxy_mean", "hossain_rel_impact_pool"
 );
-
-var chartMonthlyStats = attachChartSeries(combinedValidSignalStats, "month_label");
-var chartNormalizedMonthlyEgriStats = attachChartSeries(normalizedMonthlyEgriStats, "month_label");
-var chartNormalizedMonthlyNdssiStats = attachChartSeries(normalizedMonthlyNdssiStats, "month_label");
-var chartNormalizedMonthlyHossainStats = attachChartSeries(normalizedMonthlyHossainStats, "month_label");
+var normalizedMonthlyRedStats = normalizeByImpactPool(
+  combinedMonthlyStats, "month_label", "red_turbidity_proxy_mean", "red_rel_impact_pool"
+);
 
 var monthlyExportStats = attachMatchedProperty(
   attachMatchedProperty(
     attachMatchedProperty(
-      combinedValidSignalStats,
-      normalizedMonthlyEgriStats,
+      attachMatchedProperty(
+        combinedMonthlyStats,
+        normalizedMonthlyEgriStats,
+        "month_label",
+        "egri_rel_impact_pool",
+        "egri_rel_impact_pool"
+      ),
+      normalizedMonthlyNdssiStats,
       "month_label",
-      "egri_rel_impact_pool",
-      "egri_rel_impact_pool"
+      "ndssi_rel_impact_pool",
+      "ndssi_rel_impact_pool"
     ),
-    normalizedMonthlyNdssiStats,
+    normalizedMonthlyHossainStats,
     "month_label",
-    "ndssi_rel_impact_pool",
-    "ndssi_rel_impact_pool"
+    "hossain_rel_impact_pool",
+    "hossain_rel_impact_pool"
   ),
-  normalizedMonthlyHossainStats,
+  normalizedMonthlyRedStats,
   "month_label",
-  "hossain_rel_impact_pool",
-  "hossain_rel_impact_pool"
+  "red_rel_impact_pool",
+  "red_rel_impact_pool"
 ).map(function(feature) {
   feature = ee.Feature(feature);
   return feature.set({
     export_group: "monthly_janfeb_recent",
     analysis_year: ee.Number.parse(ee.String(feature.get("month_key")).slice(0, 4)),
-    analysis_month: ee.Number.parse(ee.String(feature.get("month_key")).slice(5, 7))
+    analysis_month: ee.Number.parse(ee.String(feature.get("month_key")).slice(5, 7)),
+    polygon_role: ee.Algorithms.If(
+      ee.String(feature.get("polygon_id")).compareTo("upstream_control").eq(0),
+      "upstream_control",
+      ee.Algorithms.If(
+        ee.String(feature.get("polygon_id")).compareTo("impact_pool").eq(0),
+        "impact_pool",
+        "downstream"
+      )
+    ),
+    sensor_label: "Sentinel-2",
+    source_label: "COPERNICUS/S2_SR_HARMONIZED",
+    analysis_scale_m: analysisScaleMeters
   });
 });
 
@@ -457,80 +476,93 @@ monthSummaries.forEach(function(summary, idx) {
   );
   print(summary.title + " window", summary.monthStart.format("YYYY-MM-dd"), summary.monthEnd.format("YYYY-MM-dd"));
   print(summary.title + " image count", summary.imageCount);
-  print(summary.title + " polygon summary", summary.validSignalStats);
+  print(summary.title + " exportable polygon rows", summary.polygonStats.size());
 });
 
-print(ui.Chart.feature.groups(
-  chartMonthlyStats, "distance_m", "egri_mean", "chart_series"
-).setChartType("LineChart").setOptions({
-  title: "January-February EGRI by Distance Downstream (2017-2026)",
-  hAxis: {title: "Distance from impact pool (m)"},
-  vAxis: {title: "Mean EGRI"},
-  lineWidth: 2,
-  pointSize: 4
-}));
+print("Monthly export row count", monthlyExportStats.size());
+print("Upstream rows in export", monthlyExportStats.filter(
+  ee.Filter.eq("polygon_id", "upstream_control")
+).size());
 
-print(ui.Chart.feature.groups(
-  chartMonthlyStats, "distance_m", "ndssi_mean", "chart_series"
-).setChartType("LineChart").setOptions({
-  title: "January-February NDSSI by Distance Downstream (2017-2026)",
-  hAxis: {title: "Distance from impact pool (m)"},
-  vAxis: {title: "Mean NDSSI"},
-  lineWidth: 2,
-  pointSize: 4
-}));
+if (showPreviewCharts) {
+  var chartMonthlyStats = attachChartSeries(
+    combinedMonthlyStats.filter(ee.Filter.gte("valid_px", minValidPixels)),
+    "month_label"
+  );
+  var chartNormalizedMonthlyEgriStats = attachChartSeries(normalizedMonthlyEgriStats, "month_label");
+  var chartNormalizedMonthlyNdssiStats = attachChartSeries(normalizedMonthlyNdssiStats, "month_label");
+  var chartNormalizedMonthlyHossainStats = attachChartSeries(normalizedMonthlyHossainStats, "month_label");
 
-print(ui.Chart.feature.groups(
-  chartMonthlyStats, "distance_m", "hossain_red_ntu_proxy_mean", "chart_series"
-).setChartType("LineChart").setOptions({
-  title: "January-February Hossain Proxy by Distance Downstream (2017-2026)",
-  hAxis: {title: "Distance from impact pool (m)"},
-  vAxis: {title: "Exploratory NTU proxy"},
-  lineWidth: 2,
-  pointSize: 4
-}));
+  print(ui.Chart.feature.groups(
+    chartMonthlyStats, "distance_m", "egri_mean", "chart_series"
+  ).setChartType("LineChart").setOptions({
+    title: "January-February EGRI by Distance Downstream (2017-2026)",
+    hAxis: {title: "Distance from impact pool (m)"},
+    vAxis: {title: "Mean EGRI"},
+    lineWidth: 2,
+    pointSize: 4
+  }));
 
-print(ui.Chart.feature.groups(
-  chartMonthlyStats, "distance_m", "red_turbidity_proxy_mean", "chart_series"
-).setChartType("LineChart").setOptions({
-  title: "January-February Red Reflectance Proxy by Distance Downstream (2017-2026)",
-  hAxis: {title: "Distance from impact pool (m)"},
-  vAxis: {title: "Mean red reflectance"},
-  lineWidth: 2,
-  pointSize: 4
-}));
+  print(ui.Chart.feature.groups(
+    chartMonthlyStats, "distance_m", "ndssi_mean", "chart_series"
+  ).setChartType("LineChart").setOptions({
+    title: "January-February NDSSI by Distance Downstream (2017-2026)",
+    hAxis: {title: "Distance from impact pool (m)"},
+    vAxis: {title: "Mean NDSSI"},
+    lineWidth: 2,
+    pointSize: 4
+  }));
 
-print(ui.Chart.feature.groups(
-  chartNormalizedMonthlyEgriStats, "distance_m", "egri_rel_impact_pool", "chart_series"
-).setChartType("LineChart").setOptions({
-  title: "Relative EGRI by Distance (impact_pool = 1; 2017-2026 Jan-Feb)",
-  hAxis: {title: "Distance from impact pool (m)"},
-  vAxis: {title: "EGRI / impact_pool EGRI"},
-  lineWidth: 2,
-  pointSize: 4
-}));
+  print(ui.Chart.feature.groups(
+    chartMonthlyStats, "distance_m", "hossain_red_ntu_proxy_mean", "chart_series"
+  ).setChartType("LineChart").setOptions({
+    title: "January-February Hossain Proxy by Distance Downstream (2017-2026)",
+    hAxis: {title: "Distance from impact pool (m)"},
+    vAxis: {title: "Exploratory NTU proxy"},
+    lineWidth: 2,
+    pointSize: 4
+  }));
 
-print(ui.Chart.feature.groups(
-  chartNormalizedMonthlyNdssiStats, "distance_m", "ndssi_rel_impact_pool", "chart_series"
-).setChartType("LineChart").setOptions({
-  title: "Relative NDSSI by Distance (impact_pool = 1; 2017-2026 Jan-Feb)",
-  hAxis: {title: "Distance from impact pool (m)"},
-  vAxis: {title: "NDSSI / impact_pool NDSSI"},
-  lineWidth: 2,
-  pointSize: 4
-}));
+  print(ui.Chart.feature.groups(
+    chartMonthlyStats, "distance_m", "red_turbidity_proxy_mean", "chart_series"
+  ).setChartType("LineChart").setOptions({
+    title: "January-February Red Reflectance Proxy by Distance Downstream (2017-2026)",
+    hAxis: {title: "Distance from impact pool (m)"},
+    vAxis: {title: "Mean red reflectance"},
+    lineWidth: 2,
+    pointSize: 4
+  }));
 
-print(ui.Chart.feature.groups(
-  chartNormalizedMonthlyHossainStats, "distance_m", "hossain_rel_impact_pool", "chart_series"
-).setChartType("LineChart").setOptions({
-  title: "Relative Hossain Proxy by Distance (impact_pool = 1; 2017-2026 Jan-Feb)",
-  hAxis: {title: "Distance from impact pool (m)"},
-  vAxis: {title: "Hossain proxy / impact_pool proxy"},
-  lineWidth: 2,
-  pointSize: 4
-}));
+  print(ui.Chart.feature.groups(
+    chartNormalizedMonthlyEgriStats, "distance_m", "egri_rel_impact_pool", "chart_series"
+  ).setChartType("LineChart").setOptions({
+    title: "Relative EGRI by Distance (impact_pool = 1; 2017-2026 Jan-Feb)",
+    hAxis: {title: "Distance from impact pool (m)"},
+    vAxis: {title: "EGRI / impact_pool EGRI"},
+    lineWidth: 2,
+    pointSize: 4
+  }));
 
-print("Monthly export table", monthlyExportStats);
+  print(ui.Chart.feature.groups(
+    chartNormalizedMonthlyNdssiStats, "distance_m", "ndssi_rel_impact_pool", "chart_series"
+  ).setChartType("LineChart").setOptions({
+    title: "Relative NDSSI by Distance (impact_pool = 1; 2017-2026 Jan-Feb)",
+    hAxis: {title: "Distance from impact pool (m)"},
+    vAxis: {title: "NDSSI / impact_pool NDSSI"},
+    lineWidth: 2,
+    pointSize: 4
+  }));
+
+  print(ui.Chart.feature.groups(
+    chartNormalizedMonthlyHossainStats, "distance_m", "hossain_rel_impact_pool", "chart_series"
+  ).setChartType("LineChart").setOptions({
+    title: "Relative Hossain Proxy by Distance (impact_pool = 1; 2017-2026 Jan-Feb)",
+    hAxis: {title: "Distance from impact pool (m)"},
+    vAxis: {title: "Hossain proxy / impact_pool proxy"},
+    lineWidth: 2,
+    pointSize: 4
+  }));
+}
 
 if (exportCsvTables) {
   Export.table.toDrive({
