@@ -57,12 +57,12 @@ var planetScenes = [
     sensor: "RapidEye-2",
     acquisitionDate: "2011-02-24",
     srAssetIds: [
-      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_SR_20110224_1645310",
-      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_SR_20110224_1645311"
+      "projects/metalminingpersonalcopy/assets/1645310_2011-02-24_RE2_3A_Analytic_SR_clip",
+      "projects/metalminingpersonalcopy/assets/1645311_2011-02-24_RE2_3A_Analytic_SR_clip"
     ],
     udmAssetIds: [
-      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_UDM_20110224_1645310",
-      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_UDM_20110224_1645311"
+      "projects/metalminingpersonalcopy/assets/1645310_2011-02-24_RE2_3A_udm_clip",
+      "projects/metalminingpersonalcopy/assets/1645311_2011-02-24_RE2_3A_udm_clip"
     ],
     bandIndexes: [0, 1, 2, 4]
   },
@@ -72,12 +72,12 @@ var planetScenes = [
     sensor: "RapidEye-4",
     acquisitionDate: "2012-02-14",
     srAssetIds: [
-      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_SR_20120214_1645310",
-      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_SR_20120214_1645311"
+      "projects/metalminingpersonalcopy/assets/1645310_2012-02-14_RE4_3A_Analytic_SR_clip",
+      "projects/metalminingpersonalcopy/assets/1645311_2012-02-14_RE4_3A_Analytic_SR_clip"
     ],
     udmAssetIds: [
-      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_UDM_20120214_1645310",
-      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_UDM_20120214_1645311"
+      "projects/metalminingpersonalcopy/assets/1645310_2012-02-14_RE4_3A_udm_clip",
+      "projects/metalminingpersonalcopy/assets/1645311_2012-02-14_RE4_3A_udm_clip"
     ],
     bandIndexes: [0, 1, 2, 4]
   },
@@ -87,12 +87,12 @@ var planetScenes = [
     sensor: "RapidEye-2",
     acquisitionDate: "2012-02-26",
     srAssetIds: [
-      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_SR_20120226_1645310",
-      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_SR_20120226_1645311"
+      "projects/metalminingpersonalcopy/assets/1645310_2012-02-26_RE2_3A_Analytic_SR_clip",
+      "projects/metalminingpersonalcopy/assets/1645311_2012-02-26_RE2_3A_Analytic_SR_clip"
     ],
     udmAssetIds: [
-      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_UDM_20120226_1645310",
-      "projects/YOUR_PROJECT/assets/RioSantaRosaDownstreamPL_RE_UDM_20120226_1645311"
+      "projects/metalminingpersonalcopy/assets/1645310_2012-02-26_RE2_3A_udm_clip",
+      "projects/metalminingpersonalcopy/assets/1645311_2012-02-26_RE2_3A_udm_clip"
     ],
     bandIndexes: [0, 1, 2, 4]
   },
