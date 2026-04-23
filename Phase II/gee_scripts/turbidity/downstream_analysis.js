@@ -46,6 +46,8 @@ var sentinelScaleMeters = 10;
 var planetScaleMeters = 5;
 var analysisScaleMeters = planetScaleMeters;
 var upstreamReferenceDistanceMeters = -500;
+var exportCsvTables = true;
+var exportFolder = "EarthEngine";
 var analysisMonths = [
   {label: "2023-02", title: "February 2023", start: ee.Date("2023-02-01")},
   {label: "2024-01", title: "January 2024", start: ee.Date("2024-01-01")}
@@ -443,6 +445,24 @@ function attachChartSeries(fc, groupProperty) {
   });
 }
 
+function attachMatchedProperty(baseFc, lookupFc, groupProperty, lookupProperty, outputProperty) {
+  return baseFc.map(function(feature) {
+    feature = ee.Feature(feature);
+    var groupValue = feature.get(groupProperty);
+    var polygonId = feature.get("polygon_id");
+    var match = ee.Feature(lookupFc
+      .filter(ee.Filter.eq(groupProperty, groupValue))
+      .filter(ee.Filter.eq("polygon_id", polygonId))
+      .first());
+    var matchedValue = ee.Algorithms.If(
+      ee.Algorithms.IsEqual(match, null),
+      null,
+      match.get(lookupProperty)
+    );
+    return feature.set(outputProperty, matchedValue);
+  });
+}
+
 // ================= INPUTS =================
 var polygons = ee.FeatureCollection([
   ee.Feature(toGeometry(upstream_control), {
@@ -650,6 +670,57 @@ var chartNormalizedSecondImageNdssiStats = attachChartSeries(normalizedSecondIma
 var chartNormalizedPlanetEgriStats = attachChartSeries(normalizedPlanetEgriStats, "scene_label");
 var chartNormalizedPlanetNdssiStats = attachChartSeries(normalizedPlanetNdssiStats, "scene_label");
 var chartNormalizedPlanetHossainStats = attachChartSeries(normalizedPlanetHossainStats, "scene_label");
+var monthlyExportStats = attachMatchedProperty(
+  attachMatchedProperty(
+    attachMatchedProperty(
+      combinedValidSignalStats,
+      normalizedMonthlyEgriStats,
+      "month_label",
+      "egri_rel_impact_pool",
+      "egri_rel_impact_pool"
+    ),
+    normalizedMonthlyNdssiStats,
+    "month_label",
+    "ndssi_rel_impact_pool",
+    "ndssi_rel_impact_pool"
+  ),
+  normalizedMonthlyHossainStats,
+  "month_label",
+  "hossain_rel_impact_pool",
+  "hossain_rel_impact_pool"
+).map(function(feature) {
+  feature = ee.Feature(feature);
+  return feature.set({
+    export_group: "monthly_summary",
+    analysis_date: feature.get("month_key"),
+    scene_label: feature.get("month_label")
+  });
+});
+var planetExportStats = attachMatchedProperty(
+  attachMatchedProperty(
+    attachMatchedProperty(
+      planetSceneSignalStats,
+      normalizedPlanetEgriStats,
+      "scene_label",
+      "egri_rel_impact_pool",
+      "egri_rel_impact_pool"
+    ),
+    normalizedPlanetNdssiStats,
+    "scene_label",
+    "ndssi_rel_impact_pool",
+    "ndssi_rel_impact_pool"
+  ),
+  normalizedPlanetHossainStats,
+  "scene_label",
+  "hossain_rel_impact_pool",
+  "hossain_rel_impact_pool"
+).map(function(feature) {
+  feature = ee.Feature(feature);
+  return feature.set({
+    export_group: "planet_scene",
+    analysis_date: feature.get("acquisition_date")
+  });
+});
 
 monthSummaries.forEach(function(summary, idx) {
   Map.addLayer(
@@ -957,5 +1028,26 @@ activePlanetScenes.forEach(function(scene, index) {
     false
   );
 });
+
+print("Monthly export table", monthlyExportStats);
+print("Planet scene export table", planetExportStats);
+
+if (exportCsvTables) {
+  Export.table.toDrive({
+    collection: monthlyExportStats,
+    description: "downstream_monthly_metrics_selected_months",
+    folder: exportFolder,
+    fileNamePrefix: "downstream_monthly_metrics_selected_months",
+    fileFormat: "CSV"
+  });
+
+  Export.table.toDrive({
+    collection: planetExportStats,
+    description: "downstream_planet_scene_metrics",
+    folder: exportFolder,
+    fileNamePrefix: "downstream_planet_scene_metrics",
+    fileFormat: "CSV"
+  });
+}
 
 print("Script ready. Fill the four Planet Labs scene placeholders, set enabled: true for uploaded scenes, and set includePlanetLabsTiles: true to include them in downstream polygon summaries.");
