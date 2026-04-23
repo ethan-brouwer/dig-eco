@@ -5,6 +5,7 @@
            proxy comparisons across user-drawn downstream polygons.
 
   GEE IMPORTS REQUIRED
+  - upstream_control
   - impact_pool
   - Poly500m
   - Poly1000m
@@ -44,6 +45,7 @@ var cloudMax = 60;
 var sentinelScaleMeters = 10;
 var planetScaleMeters = 5;
 var analysisScaleMeters = planetScaleMeters;
+var upstreamReferenceDistanceMeters = -500;
 var analysisMonths = [
   {label: "2023-02", title: "February 2023", start: ee.Date("2023-02-01")},
   {label: "2024-01", title: "January 2024", start: ee.Date("2024-01-01")}
@@ -395,6 +397,10 @@ function summarizePolygonForSingleImage(feature, image, imageLabel, imageCount) 
 
 // ================= INPUTS =================
 var polygons = ee.FeatureCollection([
+  ee.Feature(toGeometry(upstream_control), {
+    polygon_id: "upstream_control",
+    distance_m: upstreamReferenceDistanceMeters
+  }),
   ee.Feature(toGeometry(impact_pool), {polygon_id: "impact_pool", distance_m: 0}),
   ee.Feature(toGeometry(Poly500m), {polygon_id: "Poly500m", distance_m: 500}),
   ee.Feature(toGeometry(Poly1000m), {polygon_id: "Poly1000m", distance_m: 1000}),
@@ -420,6 +426,7 @@ print("Analysis summary scale (m)", analysisScaleMeters);
 print("Planet Labs enabled", includePlanetLabsTiles);
 print("Active Planet Labs scene count", activePlanetScenes.length);
 print("Planet Labs scene config", activePlanetScenes);
+print("Upstream reference distance (m)", upstreamReferenceDistanceMeters);
 print("NDSSI formula", "(Blue - NIR) / (Blue + NIR)");
 print("EGRI formula", "Green / Red");
 print("Red turbidity proxy", "Red surface reflectance");
@@ -503,6 +510,8 @@ function buildMonthSummary(config) {
 Map.setOptions("SATELLITE");
 Map.centerObject(aoi, 15);
 Map.addLayer(polygons, {color: "FFB300"}, "Downstream polygons", true);
+Map.addLayer(toGeometry(upstream_control), {color: "26A69A"}, "upstream_control", true);
+Map.addLayer(toGeometry(impact_pool), {color: "FFFF00"}, "impact_pool", true);
 var monthSummaries = analysisMonths.map(buildMonthSummary);
 var combinedValidSignalStats = ee.FeatureCollection(monthSummaries.map(function(summary) {
   return summary.validSignalStats.map(function(feature) {
