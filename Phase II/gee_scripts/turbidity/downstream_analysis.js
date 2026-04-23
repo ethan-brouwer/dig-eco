@@ -408,10 +408,18 @@ function normalizeByImpactPool(fc, groupProperty, valueProperty, outputProperty)
       feature = ee.Feature(feature);
       var valueRaw = feature.get(valueProperty);
       var value = ee.Number(valueRaw);
+      var hasBaseline = ee.Boolean(ee.Algorithms.If(
+        ee.Algorithms.IsEqual(baselineRaw, null),
+        false,
+        true
+      ));
+      var hasValue = ee.Boolean(ee.Algorithms.If(
+        ee.Algorithms.IsEqual(valueRaw, null),
+        false,
+        true
+      ));
       var normalizedValue = ee.Algorithms.If(
-        ee.Algorithms.IsEqual(baselineRaw, null).not()
-          .and(ee.Algorithms.IsEqual(valueRaw, null).not())
-          .and(baselineValue.neq(0)),
+        hasBaseline.and(hasValue).and(baselineValue.neq(0)),
         value.divide(baselineValue),
         null
       );
