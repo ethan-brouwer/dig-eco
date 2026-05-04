@@ -25,7 +25,8 @@
 // ================= USER SETTINGS =================
 var analysisStartYear = 2017;
 var analysisEndYear = new Date().getFullYear();
-var compositeMonths = [1, 2, 3]; // January, February, March
+var compositeStartMonth = 1; // January
+var compositeDurationMonths = 3; // January through March
 var tileCloudMax = 10; // Scene-level Sentinel-2 metadata filter
 var compositeScaleMeters = 10;
 var ndwiWaterThreshold = 0.1;
@@ -93,10 +94,12 @@ function makeEmptyComposite() {
 }
 
 function buildAnnualConfig(year) {
+  var start = ee.Date.fromYMD(year, compositeStartMonth, 1);
   return {
     year: year,
-    start: ee.Date.fromYMD(year, compositeMonths[0], 1),
-    end: ee.Date.fromYMD(year, compositeMonths[compositeMonths.length - 1], 1).advance(1, "month")
+    season_label: year + " Jan-Mar",
+    start: start,
+    end: start.advance(compositeDurationMonths, "month")
   };
 }
 
@@ -171,6 +174,7 @@ function buildAnnualComposite(config) {
       feature = ee.Feature(feature);
       return feature.set({
         composite_year: config.year,
+        season_label: config.season_label,
         composite_start: config.start.format("YYYY-MM-dd"),
         composite_end_exclusive: config.end.format("YYYY-MM-dd"),
         image_count: imageCount,
@@ -184,6 +188,8 @@ function buildAnnualComposite(config) {
 
   var annualSummary = ee.Feature(null, {
     composite_year: config.year,
+    composite_year_num: ee.Number(config.year),
+    season_label: config.season_label,
     composite_start: config.start.format("YYYY-MM-dd"),
     composite_end_exclusive: config.end.format("YYYY-MM-dd"),
     image_count: imageCount,
@@ -197,6 +203,76 @@ function buildAnnualComposite(config) {
     ndti_p95: ee.Algorithms.If(waterPixelCount.gt(0), percentileStats.get("NDTI_p95"), null)
   });
 
+  var polygonWaterDiagnostics = ee.FeatureCollection(ee.Algorithms.If(
+    imageCount.gt(0),
+    composite.select("NDWI").reduceRegions({
+      collection: polygons,
+      reducer: ee.Reducer.mean().combine({
+        reducer2: ee.Reducer.max(),
+        sharedInputs: true
+      }),
+      scale: compositeScaleMeters,
+      tileScale: 2
+    }),
+    polygons.map(function(feature) {
+      return ee.Feature(feature).set({
+        mean: null,
+        max: null
+      });
+    })
+  )).map(function(feature) {
+    feature = ee.Feature(feature);
+    var geom = feature.geometry();
+    var totalPolygonPx = ee.Number(
+      ee.Image.constant(1)
+        .rename("polygon_px")
+        .reduceRegion({
+          reducer: ee.Reducer.count(),
+          geometry: geom,
+          scale: compositeScaleMeters,
+          bestEffort: true,
+          maxPixels: 1e8,
+          tileScale: 2
+        })
+        .get("polygon_px")
+    );
+
+    var qualifyingWaterPx = ee.Number(ee.Algorithms.If(
+      imageCount.gt(0),
+      ee.Image.constant(1)
+        .updateMask(waterMask)
+        .rename("water_px")
+        .reduceRegion({
+          reducer: ee.Reducer.count(),
+          geometry: geom,
+          scale: compositeScaleMeters,
+          bestEffort: true,
+          maxPixels: 1e8,
+          tileScale: 2
+        })
+        .get("water_px"),
+      0
+    ));
+
+    return feature.set({
+      composite_year: config.year,
+      composite_year_num: ee.Number(config.year),
+      season_label: config.season_label,
+      image_count: imageCount,
+      ndwi_water_threshold: ndwiWaterThreshold,
+      polygon_px_total: totalPolygonPx,
+      polygon_water_px: qualifyingWaterPx,
+      polygon_water_fraction: ee.Algorithms.If(
+        totalPolygonPx.gt(0),
+        qualifyingWaterPx.divide(totalPolygonPx),
+        null
+      ),
+      polygon_qualifies_as_water: qualifyingWaterPx.gt(0),
+      polygon_ndwi_mean: feature.get("mean"),
+      polygon_ndwi_max: feature.get("max")
+    });
+  });
+
   return {
     year: config.year,
     imageCount: imageCount,
@@ -204,7 +280,8 @@ function buildAnnualComposite(config) {
     waterComposite: waterComposite,
     hotspotMask: hotspotMask,
     pixelSamples: pixelSamples,
-    annualSummary: annualSummary
+    annualSummary: annualSummary,
+    polygonWaterDiagnostics: polygonWaterDiagnostics
   };
 }
 
@@ -227,7 +304,8 @@ var polygons = ee.FeatureCollection([
 var aoi = polygons.geometry().bounds().buffer(250);
 
 print("Analysis years", analysisStartYear + " to " + analysisEndYear);
-print("Composite months", compositeMonths);
+print("Composite start month", compositeStartMonth);
+print("Composite duration (months)", compositeDurationMonths);
 print("Tile cloud max (%)", tileCloudMax);
 print("Composite scale (m)", compositeScaleMeters);
 print("NDWI water threshold", ndwiWaterThreshold);
@@ -239,7 +317,10 @@ print("NDTI formula", "(RED - GREEN) / (RED + GREEN)");
 
 var s2Base = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
   .filterBounds(aoi)
-  .filterDate(ee.Date.fromYMD(analysisStartYear, 1, 1), ee.Date.fromYMD(analysisEndYear, 4, 1))
+  .filterDate(
+    ee.Date.fromYMD(analysisStartYear, compositeStartMonth, 1),
+    ee.Date.fromYMD(analysisEndYear + 1, compositeStartMonth, 1).advance(compositeDurationMonths, "month")
+  )
   .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", tileCloudMax))
   .map(scaleAndSelectS2)
   .map(maskS2)
@@ -253,12 +334,14 @@ Map.addLayer(polygons, {color: "FFB300"}, "Monitoring polygons", true);
 var annualOutputs = [];
 var sampleCollections = [];
 var annualSummaryFeatures = [];
+var polygonDiagnosticCollections = [];
 
 for (var year = analysisStartYear; year <= analysisEndYear; year++) {
   var annualOutput = buildAnnualComposite(buildAnnualConfig(year));
   annualOutputs.push(annualOutput);
   sampleCollections.push(annualOutput.pixelSamples);
   annualSummaryFeatures.push(annualOutput.annualSummary);
+  polygonDiagnosticCollections.push(annualOutput.polygonWaterDiagnostics);
 
   Map.addLayer(
     annualOutput.composite.select(["red", "green", "blue"]),
@@ -269,23 +352,24 @@ for (var year = analysisStartYear; year <= analysisEndYear; year++) {
   Map.addLayer(
     annualOutput.waterComposite.select("NDWI"),
     {min: -0.2, max: 0.6, palette: ["#8c510a", "#f6e8c3", "#01665e"]},
-    year + " NDWI water mask",
+    year + " Jan-Mar NDWI water mask",
     false
   );
   Map.addLayer(
     annualOutput.waterComposite.select("NDTI"),
     {min: -0.2, max: 0.4, palette: ["#313695", "#ffffbf", "#a50026"]},
-    year + " NDTI",
+    year + " Jan-Mar NDTI",
     false
   );
   Map.addLayer(
     annualOutput.hotspotMask,
     {palette: ["#ff00ff"]},
-    year + " NDTI hotspots",
+    year + " Jan-Mar NDTI hotspots",
     false
   );
 
   print(year + " image count", annualOutput.imageCount);
+  print(year + " polygon water diagnostics", annualOutput.polygonWaterDiagnostics);
 }
 
 var allPixelSamples = ee.FeatureCollection([]);
@@ -294,15 +378,20 @@ sampleCollections.forEach(function(fc) {
 });
 
 var annualSummaryTable = ee.FeatureCollection(annualSummaryFeatures);
+var polygonWaterDiagnosticsTable = ee.FeatureCollection([]);
+polygonDiagnosticCollections.forEach(function(fc) {
+  polygonWaterDiagnosticsTable = polygonWaterDiagnosticsTable.merge(fc);
+});
 
 print("Annual summary table", annualSummaryTable);
+print("Polygon water diagnostics table", polygonWaterDiagnosticsTable);
 print("Pixel sample row count", allPixelSamples.size());
 print("Pixel sample preview", allPixelSamples.limit(10));
 
 if (showPreviewCharts) {
   var annualSummaryChart = ui.Chart.feature.byFeature({
     features: annualSummaryTable.sort("composite_year"),
-    xProperty: "composite_year",
+    xProperty: "composite_year_num",
     yProperties: ["ndti_p50", "ndti_p75", "ndti_p90", "ndti_p95"]
   }).setChartType("LineChart").setOptions({
     title: "Annual Jan-Mar Water-Only NDTI Percentiles",
@@ -321,10 +410,10 @@ if (showPreviewCharts) {
 
   var waterPixelChart = ui.Chart.feature.byFeature({
     features: annualSummaryTable.sort("composite_year"),
-    xProperty: "composite_year",
+    xProperty: "composite_year_num",
     yProperties: ["water_pixel_count", "image_count"]
   }).setChartType("ColumnChart").setOptions({
-    title: "Annual Water Pixel Count and Scene Count",
+    title: "Annual Jan-Mar Water Pixel Count and Scene Count",
     hAxis: {title: "Year"},
     vAxis: {title: "Count"},
     series: {
@@ -337,6 +426,34 @@ if (showPreviewCharts) {
     }
   });
   print(waterPixelChart);
+
+  var polygonWaterChart = ui.Chart.feature.groups({
+    features: polygonWaterDiagnosticsTable,
+    xProperty: "composite_year_num",
+    yProperty: "polygon_water_fraction",
+    seriesProperty: "polygon_id"
+  }).setChartType("LineChart").setOptions({
+    title: "Jan-Mar Water Fraction by Polygon",
+    hAxis: {title: "Year"},
+    vAxis: {title: "Water-qualified fraction of polygon"},
+    lineWidth: 2,
+    pointSize: 4
+  });
+  print(polygonWaterChart);
+
+  var polygonNdwiChart = ui.Chart.feature.groups({
+    features: polygonWaterDiagnosticsTable,
+    xProperty: "composite_year_num",
+    yProperty: "polygon_ndwi_mean",
+    seriesProperty: "polygon_id"
+  }).setChartType("LineChart").setOptions({
+    title: "Jan-Mar Mean NDWI by Polygon",
+    hAxis: {title: "Year"},
+    vAxis: {title: "Mean NDWI"},
+    lineWidth: 2,
+    pointSize: 4
+  });
+  print(polygonNdwiChart);
 
   var previewOutput = null;
   annualOutputs.forEach(function(output) {
@@ -410,4 +527,4 @@ if (exportHotspotRasters) {
   });
 }
 
-print("Script ready. It builds annual Jan-Mar water-only composites, computes NDWI and NDTI, and exports pixel-level values for hotspot graphing.");
+print("Script ready. It builds annual Jan-Mar water-only composites, computes NDWI and NDTI, and previews hotspot behavior in GEE.");
