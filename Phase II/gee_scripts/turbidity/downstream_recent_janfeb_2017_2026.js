@@ -24,11 +24,11 @@
 var analysisStartYear = 2017;
 var analysisEndYear = 2026;
 var analysisMonths = [2, 3]; // February and March
-var cloudMax = 40;
 var sentinelScaleMeters = 10;
 var analysisScaleMeters = sentinelScaleMeters;
 var upstreamReferenceDistanceMeters = -500;
 var minValidPixels = 3;
+var minSceneClearFractionOverAoi = 0.1;
 var exportCsvTables = true;
 var exportFolder = "EarthEngine";
 var showPreviewCharts = false;
@@ -106,6 +106,34 @@ function addIndices(img) {
   ).rename("HOSSAIN_RED_NTU_PROXY");
 
   return img.addBands([ndssi, egri, redTurbidityProxy, hossainRedTurbidity]);
+}
+
+function addAoiClearFraction(img) {
+  var validPx = ee.Number(
+    ee.Image.constant(1)
+      .updateMask(img.select("red").mask())
+      .rename("valid_px")
+      .reduceRegion({
+        reducer: ee.Reducer.count(),
+        geometry: aoi,
+        scale: analysisScaleMeters,
+        bestEffort: true,
+        maxPixels: 1e8,
+        tileScale: 2
+      })
+      .get("valid_px")
+  );
+
+  var clearFraction = ee.Algorithms.If(
+    aoiPixelCount.gt(0),
+    validPx.divide(aoiPixelCount),
+    0
+  );
+
+  return img.set({
+    aoi_valid_px: validPx,
+    aoi_clear_fraction: clearFraction
+  });
 }
 
 function makeEmptyAnalysisImage() {
@@ -324,14 +352,27 @@ var polygons = ee.FeatureCollection([
 ]);
 
 var aoi = polygons.geometry().bounds().buffer(250);
+var aoiPixelCount = ee.Number(
+  ee.Image.constant(1)
+    .rename("aoi_px")
+    .reduceRegion({
+      reducer: ee.Reducer.count(),
+      geometry: aoi,
+      scale: analysisScaleMeters,
+      bestEffort: true,
+      maxPixels: 1e8,
+      tileScale: 2
+    })
+    .get("aoi_px")
+);
 
 print("Sentinel-2 scale (m)", sentinelScaleMeters);
 print("Analysis summary scale (m)", analysisScaleMeters);
-print("Cloud max (%)", cloudMax);
 print("Analysis years", analysisStartYear + " to " + analysisEndYear);
 print("Analysis months", analysisMonths);
 print("Upstream reference distance (m)", upstreamReferenceDistanceMeters);
 print("Minimum valid pixels", minValidPixels);
+print("Minimum AOI clear fraction per scene", minSceneClearFractionOverAoi);
 print("Show preview charts", showPreviewCharts);
 print("NDSSI formula", "(Blue - NIR) / (Blue + NIR)");
 print("EGRI formula", "Green / Red");
@@ -345,10 +386,11 @@ var s2Base = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
     ee.Date.fromYMD(analysisEndYear, analysisMonths[analysisMonths.length - 1], 1)
       .advance(1, "month")
   )
-  .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", cloudMax))
   .map(scaleAndSelectS2)
   .map(maskS2)
-  .map(addIndices);
+  .map(addIndices)
+  .map(addAoiClearFraction)
+  .filter(ee.Filter.gte("aoi_clear_fraction", minSceneClearFractionOverAoi));
 
 function buildMonthSummary(config) {
   var monthStart = config.start;
