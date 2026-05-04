@@ -113,8 +113,25 @@ function buildAnnualComposite(config) {
   var waterMask = composite.select("NDWI").gt(ndwiWaterThreshold);
   var waterComposite = composite.updateMask(waterMask);
 
-  var percentileStats = ee.Dictionary(ee.Algorithms.If(
+  var waterPixelCount = ee.Number(ee.Algorithms.If(
     imageCount.gt(0),
+    ee.Image.constant(1)
+      .updateMask(waterComposite.select("NDTI").mask())
+      .rename("water_px")
+      .reduceRegion({
+        reducer: ee.Reducer.count(),
+        geometry: aoi,
+        scale: compositeScaleMeters,
+        bestEffort: true,
+        maxPixels: 1e8,
+        tileScale: 2
+      })
+      .get("water_px"),
+    0
+  ));
+
+  var percentileStats = ee.Dictionary(ee.Algorithms.If(
+    imageCount.gt(0).and(waterPixelCount.gt(0)),
     waterComposite.select("NDTI").reduceRegion({
       reducer: ee.Reducer.percentile([50, 75, hotspotPercentile, 95]),
       geometry: aoi,
@@ -126,7 +143,11 @@ function buildAnnualComposite(config) {
     ee.Dictionary({})
   ));
 
-  var hotspotThreshold = percentileStats.get("NDTI_p" + hotspotPercentile);
+  var hotspotThreshold = ee.Algorithms.If(
+    waterPixelCount.gt(0),
+    percentileStats.get("NDTI_p" + hotspotPercentile),
+    null
+  );
   var hotspotMask = ee.Image(ee.Algorithms.If(
     ee.Algorithms.IsEqual(hotspotThreshold, null),
     ee.Image(0).selfMask(),
@@ -138,7 +159,7 @@ function buildAnnualComposite(config) {
     .addBands(ee.Image.pixelLonLat());
 
   var pixelSamples = ee.FeatureCollection(ee.Algorithms.If(
-    imageCount.gt(0),
+    imageCount.gt(0).and(waterPixelCount.gt(0)),
     sampleImage.sample({
       region: aoi,
       scale: compositeScaleMeters,
@@ -167,11 +188,11 @@ function buildAnnualComposite(config) {
     ndwi_water_threshold: ndwiWaterThreshold,
     hotspot_percentile: hotspotPercentile,
     hotspot_ndti_threshold: hotspotThreshold,
-    water_pixel_count: pixelSamples.size(),
-    ndti_p50: percentileStats.get("NDTI_p50"),
-    ndti_p75: percentileStats.get("NDTI_p75"),
-    ndti_p90: percentileStats.get("NDTI_p" + hotspotPercentile),
-    ndti_p95: percentileStats.get("NDTI_p95")
+    water_pixel_count: waterPixelCount,
+    ndti_p50: ee.Algorithms.If(waterPixelCount.gt(0), percentileStats.get("NDTI_p50"), null),
+    ndti_p75: ee.Algorithms.If(waterPixelCount.gt(0), percentileStats.get("NDTI_p75"), null),
+    ndti_p90: ee.Algorithms.If(waterPixelCount.gt(0), percentileStats.get("NDTI_p" + hotspotPercentile), null),
+    ndti_p95: ee.Algorithms.If(waterPixelCount.gt(0), percentileStats.get("NDTI_p95"), null)
   });
 
   return {
