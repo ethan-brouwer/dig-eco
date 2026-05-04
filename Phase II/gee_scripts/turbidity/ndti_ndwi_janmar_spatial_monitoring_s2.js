@@ -31,9 +31,11 @@ var compositeScaleMeters = 10;
 var ndwiWaterThreshold = 0.1;
 var hotspotPercentile = 90;
 var exportFolder = "EarthEngine";
-var exportPixelTable = true;
-var exportAnnualSummaryTable = true;
+var exportPixelTable = false;
+var exportAnnualSummaryTable = false;
 var exportHotspotRasters = false;
+var showPreviewCharts = true;
+var chartPreviewYear = 2024;
 
 // ================= HELPERS =================
 function toGeometry(obj) {
@@ -230,6 +232,8 @@ print("Tile cloud max (%)", tileCloudMax);
 print("Composite scale (m)", compositeScaleMeters);
 print("NDWI water threshold", ndwiWaterThreshold);
 print("NDTI hotspot percentile", hotspotPercentile);
+print("Show preview charts", showPreviewCharts);
+print("Chart preview year", chartPreviewYear);
 print("NDWI formula", "(GREEN - NIR) / (GREEN + NIR)");
 print("NDTI formula", "(RED - GREEN) / (RED + GREEN)");
 
@@ -294,6 +298,83 @@ var annualSummaryTable = ee.FeatureCollection(annualSummaryFeatures);
 print("Annual summary table", annualSummaryTable);
 print("Pixel sample row count", allPixelSamples.size());
 print("Pixel sample preview", allPixelSamples.limit(10));
+
+if (showPreviewCharts) {
+  var annualSummaryChart = ui.Chart.feature.byFeature({
+    features: annualSummaryTable.sort("composite_year"),
+    xProperty: "composite_year",
+    yProperties: ["ndti_p50", "ndti_p75", "ndti_p90", "ndti_p95"]
+  }).setChartType("LineChart").setOptions({
+    title: "Annual Jan-Mar Water-Only NDTI Percentiles",
+    hAxis: {title: "Year"},
+    vAxis: {title: "NDTI"},
+    lineWidth: 2,
+    pointSize: 5,
+    series: {
+      0: {color: "#2c7fb8"},
+      1: {color: "#41b6c4"},
+      2: {color: "#f03b20"},
+      3: {color: "#bd0026"}
+    }
+  });
+  print(annualSummaryChart);
+
+  var waterPixelChart = ui.Chart.feature.byFeature({
+    features: annualSummaryTable.sort("composite_year"),
+    xProperty: "composite_year",
+    yProperties: ["water_pixel_count", "image_count"]
+  }).setChartType("ColumnChart").setOptions({
+    title: "Annual Water Pixel Count and Scene Count",
+    hAxis: {title: "Year"},
+    vAxis: {title: "Count"},
+    series: {
+      0: {targetAxisIndex: 0, color: "#1b9e77"},
+      1: {targetAxisIndex: 1, color: "#7570b3"}
+    },
+    vAxes: {
+      0: {title: "Water Pixels"},
+      1: {title: "Scenes"}
+    }
+  });
+  print(waterPixelChart);
+
+  var previewOutput = null;
+  annualOutputs.forEach(function(output) {
+    if (output.year === chartPreviewYear) {
+      previewOutput = output;
+    }
+  });
+
+  if (previewOutput !== null) {
+    var ndtiHistogram = ui.Chart.image.histogram({
+      image: previewOutput.waterComposite.select("NDTI"),
+      region: aoi,
+      scale: compositeScaleMeters,
+      maxPixels: 1e8
+    }).setOptions({
+      title: chartPreviewYear + " Jan-Mar Water-Only NDTI Histogram",
+      hAxis: {title: "NDTI"},
+      vAxis: {title: "Pixel count"},
+      colors: ["#d95f02"]
+    });
+    print(ndtiHistogram);
+
+    var ndwiHistogram = ui.Chart.image.histogram({
+      image: previewOutput.waterComposite.select("NDWI"),
+      region: aoi,
+      scale: compositeScaleMeters,
+      maxPixels: 1e8
+    }).setOptions({
+      title: chartPreviewYear + " Jan-Mar Water-Only NDWI Histogram",
+      hAxis: {title: "NDWI"},
+      vAxis: {title: "Pixel count"},
+      colors: ["#1f78b4"]
+    });
+    print(ndwiHistogram);
+  } else {
+    print("Chart preview year not found in annual outputs:", chartPreviewYear);
+  }
+}
 
 if (exportPixelTable) {
   Export.table.toDrive({
