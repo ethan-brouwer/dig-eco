@@ -27,9 +27,9 @@ var analysisStartYear = 2017;
 var analysisEndYear = new Date().getFullYear();
 var compositeStartMonth = 1; // January
 var compositeDurationMonths = 3; // January through March
-var tileCloudMax = 10; // Scene-level Sentinel-2 metadata filter
+var tileCloudMax = 30; // Relaxed tile-level prefilter; pixel QA mask still removes clouds
 var compositeScaleMeters = 10;
-var ndwiWaterThreshold = 0.1;
+var ndwiWaterThreshold = 0.0; // More permissive for narrow or mixed river pixels
 var hotspotPercentile = 90;
 var exportFolder = "EarthEngine";
 var exportPixelTable = false;
@@ -475,6 +475,19 @@ if (showPreviewCharts) {
       colors: ["#d95f02"]
     });
     print(ndtiHistogram);
+
+    var ndwiPreMaskHistogram = ui.Chart.image.histogram({
+      image: previewOutput.composite.select("NDWI"),
+      region: aoi,
+      scale: compositeScaleMeters,
+      maxPixels: 1e8
+    }).setOptions({
+      title: chartPreviewYear + " Jan-Mar NDWI Histogram Before Water Mask",
+      hAxis: {title: "NDWI"},
+      vAxis: {title: "Pixel count"},
+      colors: ["#6a3d9a"]
+    });
+    print(ndwiPreMaskHistogram);
 
     var ndwiHistogram = ui.Chart.image.histogram({
       image: previewOutput.waterComposite.select("NDWI"),
