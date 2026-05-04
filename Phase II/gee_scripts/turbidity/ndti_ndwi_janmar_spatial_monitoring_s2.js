@@ -302,6 +302,8 @@ var polygons = ee.FeatureCollection([
 ]);
 
 var aoi = polygons.geometry().bounds().buffer(250);
+var polygonUnion = polygons.geometry();
+var outsidePolygons = aoi.difference(polygonUnion, 1);
 
 print("Analysis years", analysisStartYear + " to " + analysisEndYear);
 print("Composite start month", compositeStartMonth);
@@ -488,6 +490,32 @@ if (showPreviewCharts) {
       colors: ["#6a3d9a"]
     });
     print(ndwiPreMaskHistogram);
+
+    var ndwiInsidePolygonsHistogram = ui.Chart.image.histogram({
+      image: previewOutput.composite.select("NDWI"),
+      region: polygonUnion,
+      scale: compositeScaleMeters,
+      maxPixels: 1e8
+    }).setOptions({
+      title: chartPreviewYear + " Jan-Mar NDWI Histogram Inside Monitoring Polygons",
+      hAxis: {title: "NDWI"},
+      vAxis: {title: "Pixel count"},
+      colors: ["#33a02c"]
+    });
+    print(ndwiInsidePolygonsHistogram);
+
+    var ndwiOutsidePolygonsHistogram = ui.Chart.image.histogram({
+      image: previewOutput.composite.select("NDWI"),
+      region: outsidePolygons,
+      scale: compositeScaleMeters,
+      maxPixels: 1e8
+    }).setOptions({
+      title: chartPreviewYear + " Jan-Mar NDWI Histogram Outside Monitoring Polygons",
+      hAxis: {title: "NDWI"},
+      vAxis: {title: "Pixel count"},
+      colors: ["#e31a1c"]
+    });
+    print(ndwiOutsidePolygonsHistogram);
 
     var ndwiHistogram = ui.Chart.image.histogram({
       image: previewOutput.waterComposite.select("NDWI"),
