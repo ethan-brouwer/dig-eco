@@ -31,6 +31,7 @@ var tileCloudMax = 30; // Relaxed tile-level prefilter; pixel QA mask still remo
 var compositeScaleMeters = 10;
 var ndwiWaterThreshold = 0.0; // More permissive for narrow or mixed river pixels
 var hotspotPercentile = 90;
+var constrainAnalysisToPolygons = true;
 var exportFolder = "EarthEngine";
 var exportPixelTable = false;
 var exportAnnualSummaryTable = false;
@@ -115,14 +116,19 @@ function buildAnnualComposite(config) {
     makeEmptyComposite()
   ));
 
-  var waterMask = composite.select("NDWI").gt(ndwiWaterThreshold);
-  var waterComposite = composite.updateMask(waterMask);
+  var ndwiMask = composite.select("NDWI").gt(ndwiWaterThreshold);
+  var analysisMask = ee.Image(ee.Algorithms.If(
+    constrainAnalysisToPolygons,
+    polygonMaskImage,
+    ndwiMask
+  ));
+  var analysisComposite = composite.updateMask(analysisMask);
 
-  var waterPixelCount = ee.Number(ee.Algorithms.If(
+  var analysisPixelCount = ee.Number(ee.Algorithms.If(
     imageCount.gt(0),
     ee.Image.constant(1)
-      .updateMask(waterComposite.select("NDTI").mask())
-      .rename("water_px")
+      .updateMask(analysisComposite.select("NDTI").mask())
+      .rename("analysis_px")
       .reduceRegion({
         reducer: ee.Reducer.count(),
         geometry: aoi,
@@ -131,13 +137,13 @@ function buildAnnualComposite(config) {
         maxPixels: 1e8,
         tileScale: 2
       })
-      .get("water_px"),
+      .get("analysis_px"),
     0
   ));
 
   var percentileStats = ee.Dictionary(ee.Algorithms.If(
-    imageCount.gt(0).and(waterPixelCount.gt(0)),
-    waterComposite.select("NDTI").reduceRegion({
+    imageCount.gt(0).and(analysisPixelCount.gt(0)),
+    analysisComposite.select("NDTI").reduceRegion({
       reducer: ee.Reducer.percentile([50, 75, hotspotPercentile, 95]),
       geometry: aoi,
       scale: compositeScaleMeters,
@@ -149,22 +155,22 @@ function buildAnnualComposite(config) {
   ));
 
   var hotspotThreshold = ee.Algorithms.If(
-    waterPixelCount.gt(0),
+    analysisPixelCount.gt(0),
     percentileStats.get("NDTI_p" + hotspotPercentile),
     null
   );
   var hotspotMask = ee.Image(ee.Algorithms.If(
     ee.Algorithms.IsEqual(hotspotThreshold, null),
     ee.Image(0).selfMask(),
-    waterComposite.select("NDTI").gte(ee.Number(hotspotThreshold)).selfMask()
+    analysisComposite.select("NDTI").gte(ee.Number(hotspotThreshold)).selfMask()
   )).rename("NDTI_hotspot");
 
-  var sampleImage = waterComposite.select(["NDWI", "NDTI", "red", "green", "blue", "nir"])
+  var sampleImage = analysisComposite.select(["NDWI", "NDTI", "red", "green", "blue", "nir"])
     .addBands(ee.Image.constant(config.year).rename("analysis_year"))
     .addBands(ee.Image.pixelLonLat());
 
   var pixelSamples = ee.FeatureCollection(ee.Algorithms.If(
-    imageCount.gt(0).and(waterPixelCount.gt(0)),
+    imageCount.gt(0).and(analysisPixelCount.gt(0)),
     sampleImage.sample({
       region: aoi,
       scale: compositeScaleMeters,
@@ -179,6 +185,7 @@ function buildAnnualComposite(config) {
         composite_end_exclusive: config.end.format("YYYY-MM-dd"),
         image_count: imageCount,
         ndwi_water_threshold: ndwiWaterThreshold,
+        constrain_analysis_to_polygons: constrainAnalysisToPolygons,
         hotspot_percentile: hotspotPercentile,
         hotspot_ndti_threshold: hotspotThreshold
       });
@@ -194,13 +201,14 @@ function buildAnnualComposite(config) {
     composite_end_exclusive: config.end.format("YYYY-MM-dd"),
     image_count: imageCount,
     ndwi_water_threshold: ndwiWaterThreshold,
+    constrain_analysis_to_polygons: constrainAnalysisToPolygons,
     hotspot_percentile: hotspotPercentile,
     hotspot_ndti_threshold: hotspotThreshold,
-    water_pixel_count: waterPixelCount,
-    ndti_p50: ee.Algorithms.If(waterPixelCount.gt(0), percentileStats.get("NDTI_p50"), null),
-    ndti_p75: ee.Algorithms.If(waterPixelCount.gt(0), percentileStats.get("NDTI_p75"), null),
-    ndti_p90: ee.Algorithms.If(waterPixelCount.gt(0), percentileStats.get("NDTI_p" + hotspotPercentile), null),
-    ndti_p95: ee.Algorithms.If(waterPixelCount.gt(0), percentileStats.get("NDTI_p95"), null)
+    analysis_pixel_count: analysisPixelCount,
+    ndti_p50: ee.Algorithms.If(analysisPixelCount.gt(0), percentileStats.get("NDTI_p50"), null),
+    ndti_p75: ee.Algorithms.If(analysisPixelCount.gt(0), percentileStats.get("NDTI_p75"), null),
+    ndti_p90: ee.Algorithms.If(analysisPixelCount.gt(0), percentileStats.get("NDTI_p" + hotspotPercentile), null),
+    ndti_p95: ee.Algorithms.If(analysisPixelCount.gt(0), percentileStats.get("NDTI_p95"), null)
   });
 
   var polygonWaterDiagnostics = ee.FeatureCollection(ee.Algorithms.If(
@@ -240,7 +248,7 @@ function buildAnnualComposite(config) {
     var qualifyingWaterPx = ee.Number(ee.Algorithms.If(
       imageCount.gt(0),
       ee.Image.constant(1)
-        .updateMask(waterMask)
+        .updateMask(analysisMask)
         .rename("water_px")
         .reduceRegion({
           reducer: ee.Reducer.count(),
@@ -277,7 +285,7 @@ function buildAnnualComposite(config) {
     year: config.year,
     imageCount: imageCount,
     composite: composite,
-    waterComposite: waterComposite,
+    analysisComposite: analysisComposite,
     hotspotMask: hotspotMask,
     pixelSamples: pixelSamples,
     annualSummary: annualSummary,
@@ -304,6 +312,7 @@ var polygons = ee.FeatureCollection([
 var aoi = polygons.geometry().bounds().buffer(250);
 var polygonUnion = polygons.geometry();
 var outsidePolygons = aoi.difference(polygonUnion, 1);
+var polygonMaskImage = ee.Image.constant(1).clip(polygonUnion).selfMask();
 
 print("Analysis years", analysisStartYear + " to " + analysisEndYear);
 print("Composite start month", compositeStartMonth);
@@ -311,6 +320,7 @@ print("Composite duration (months)", compositeDurationMonths);
 print("Tile cloud max (%)", tileCloudMax);
 print("Composite scale (m)", compositeScaleMeters);
 print("NDWI water threshold", ndwiWaterThreshold);
+print("Constrain analysis to polygons", constrainAnalysisToPolygons);
 print("NDTI hotspot percentile", hotspotPercentile);
 print("Show preview charts", showPreviewCharts);
 print("Chart preview year", chartPreviewYear);
@@ -352,13 +362,13 @@ for (var year = analysisStartYear; year <= analysisEndYear; year++) {
     year === analysisStartYear
   );
   Map.addLayer(
-    annualOutput.waterComposite.select("NDWI"),
+    annualOutput.analysisComposite.select("NDWI"),
     {min: -0.2, max: 0.6, palette: ["#8c510a", "#f6e8c3", "#01665e"]},
-    year + " Jan-Mar NDWI water mask",
+    year + " Jan-Mar NDWI analysis mask",
     false
   );
   Map.addLayer(
-    annualOutput.waterComposite.select("NDTI"),
+    annualOutput.analysisComposite.select("NDTI"),
     {min: -0.2, max: 0.4, palette: ["#313695", "#ffffbf", "#a50026"]},
     year + " Jan-Mar NDTI",
     false
@@ -396,7 +406,7 @@ if (showPreviewCharts) {
     xProperty: "composite_year_num",
     yProperties: ["ndti_p50", "ndti_p75", "ndti_p90", "ndti_p95"]
   }).setChartType("LineChart").setOptions({
-    title: "Annual Jan-Mar Water-Only NDTI Percentiles",
+    title: "Annual Jan-Mar Polygon-Constrained NDTI Percentiles",
     hAxis: {title: "Year"},
     vAxis: {title: "NDTI"},
     lineWidth: 2,
@@ -413,9 +423,9 @@ if (showPreviewCharts) {
   var waterPixelChart = ui.Chart.feature.byFeature({
     features: annualSummaryTable.sort("composite_year"),
     xProperty: "composite_year_num",
-    yProperties: ["water_pixel_count", "image_count"]
+    yProperties: ["analysis_pixel_count", "image_count"]
   }).setChartType("ColumnChart").setOptions({
-    title: "Annual Jan-Mar Water Pixel Count and Scene Count",
+    title: "Annual Jan-Mar Analysis Pixel Count and Scene Count",
     hAxis: {title: "Year"},
     vAxis: {title: "Count"},
     series: {
@@ -423,7 +433,7 @@ if (showPreviewCharts) {
       1: {targetAxisIndex: 1, color: "#7570b3"}
     },
     vAxes: {
-      0: {title: "Water Pixels"},
+      0: {title: "Analysis Pixels"},
       1: {title: "Scenes"}
     }
   });
@@ -466,12 +476,12 @@ if (showPreviewCharts) {
 
   if (previewOutput !== null) {
     var ndtiHistogram = ui.Chart.image.histogram({
-      image: previewOutput.waterComposite.select("NDTI"),
+      image: previewOutput.analysisComposite.select("NDTI"),
       region: aoi,
       scale: compositeScaleMeters,
       maxPixels: 1e8
     }).setOptions({
-      title: chartPreviewYear + " Jan-Mar Water-Only NDTI Histogram",
+      title: chartPreviewYear + " Jan-Mar Polygon-Constrained NDTI Histogram",
       hAxis: {title: "NDTI"},
       vAxis: {title: "Pixel count"},
       colors: ["#d95f02"]
@@ -518,12 +528,12 @@ if (showPreviewCharts) {
     print(ndwiOutsidePolygonsHistogram);
 
     var ndwiHistogram = ui.Chart.image.histogram({
-      image: previewOutput.waterComposite.select("NDWI"),
+      image: previewOutput.analysisComposite.select("NDWI"),
       region: aoi,
       scale: compositeScaleMeters,
       maxPixels: 1e8
     }).setOptions({
-      title: chartPreviewYear + " Jan-Mar Water-Only NDWI Histogram",
+      title: chartPreviewYear + " Jan-Mar Polygon-Constrained NDWI Histogram",
       hAxis: {title: "NDWI"},
       vAxis: {title: "Pixel count"},
       colors: ["#1f78b4"]
