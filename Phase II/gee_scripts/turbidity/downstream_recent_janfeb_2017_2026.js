@@ -120,108 +120,101 @@ function makeEmptyAnalysisImage() {
       "RED_TURBIDITY_PROXY",
       "HOSSAIN_RED_NTU_PROXY"
     ])
-    .clip(aoi)
     .selfMask();
 }
 
-function summarizePolygon(feature, imageCollection, monthImage, imageCount) {
-  feature = ee.Feature(feature);
-  var geom = feature.geometry();
-  var areaSqm = geom.area(1);
+function summarizeMonthlyComposite(monthImage, imageCount, config, monthStart, monthEnd) {
+  var metricBandNames = [
+    "NDSSI",
+    "EGRI",
+    "RED_TURBIDITY_PROXY",
+    "HOSSAIN_RED_NTU_PROXY"
+  ];
 
-  var validMask = monthImage.select("red").mask().clip(geom);
-  var validPx = ee.Number(ee.Algorithms.If(
+  var meanStats = ee.FeatureCollection(ee.Algorithms.If(
     imageCount.gt(0),
-    validMask.reduceRegion({
-      reducer: ee.Reducer.count(),
-      geometry: geom,
+    monthImage.select(metricBandNames).reduceRegions({
+      collection: polygons,
+      reducer: ee.Reducer.mean(),
       scale: analysisScaleMeters,
-      bestEffort: true,
-      maxPixels: 1e8
-    }).get("red"),
-    0
-  ));
-
-  var perImageStats = ee.FeatureCollection(ee.Algorithms.If(
-    imageCount.gt(0),
-    imageCollection.map(function(img) {
-      var imageValidMask = img.select("red").mask().clip(geom);
-      var imageValidPx = ee.Number(imageValidMask.reduceRegion({
-        reducer: ee.Reducer.count(),
-        geometry: geom,
-        scale: analysisScaleMeters,
-        bestEffort: true,
-        maxPixels: 1e8
-      }).get("red"));
-
-      var imageStats = ee.Dictionary(ee.Algorithms.If(
-        imageValidPx.gt(0),
-        img.select(["NDSSI", "EGRI", "RED_TURBIDITY_PROXY", "HOSSAIN_RED_NTU_PROXY"])
-          .updateMask(imageValidMask)
-          .reduceRegion({
-            reducer: ee.Reducer.mean(),
-            geometry: geom,
-            scale: analysisScaleMeters,
-            bestEffort: true,
-            maxPixels: 1e8
-          }),
-        ee.Dictionary({})
-      ));
-
-      return ee.Feature(null, {
-        valid_px: imageValidPx,
-        ndssi_mean: imageStats.get("NDSSI"),
-        egri_mean: imageStats.get("EGRI"),
-        red_turbidity_proxy_mean: imageStats.get("RED_TURBIDITY_PROXY"),
-        hossain_red_ntu_proxy_mean: imageStats.get("HOSSAIN_RED_NTU_PROXY")
-      });
+      tileScale: 2
     }),
-    ee.FeatureCollection([])
+    polygons
   ));
 
-  var validPerImageStats = perImageStats.filter(ee.Filter.gt("valid_px", 0));
-  var ndssiMedian = ee.Algorithms.If(
-    validPerImageStats.size().gt(0),
-    ee.Array(validPerImageStats.aggregate_array("ndssi_mean"))
-      .reduce(ee.Reducer.median(), [0])
-      .get([0]),
-    null
-  );
-  var egriMedian = ee.Algorithms.If(
-    validPerImageStats.size().gt(0),
-    ee.Array(validPerImageStats.aggregate_array("egri_mean"))
-      .reduce(ee.Reducer.median(), [0])
-      .get([0]),
-    null
-  );
-  var redMedian = ee.Algorithms.If(
-    validPerImageStats.size().gt(0),
-    ee.Array(validPerImageStats.aggregate_array("red_turbidity_proxy_mean"))
-      .reduce(ee.Reducer.median(), [0])
-      .get([0]),
-    null
-  );
-  var hossainMedian = ee.Algorithms.If(
-    validPerImageStats.size().gt(0),
-    ee.Array(validPerImageStats.aggregate_array("hossain_red_ntu_proxy_mean"))
-      .reduce(ee.Reducer.median(), [0])
-      .get([0]),
-    null
-  );
+  var validPxImage = ee.Image.constant(1)
+    .updateMask(monthImage.select("red").mask())
+    .rename("valid_px");
 
-  return feature.set({
-    polygon_area_sqm: areaSqm,
-    image_count: imageCount,
-    valid_px: validPx,
-    has_valid_pixels: validPx.gte(minValidPixels),
-    qa_flag: ee.Algorithms.If(imageCount.eq(0), "no_images",
-      ee.Algorithms.If(validPx.gte(minValidPixels), "ok", "low_valid_px")),
-    ndssi_mean: ndssiMedian,
-    egri_mean: egriMedian,
-    red_turbidity_proxy_mean: redMedian,
-    hossain_red_ntu_proxy_mean: hossainMedian,
-    per_image_valid_count: validPerImageStats.size()
-  });
+  var validPxStats = ee.FeatureCollection(ee.Algorithms.If(
+    imageCount.gt(0),
+    validPxImage.reduceRegions({
+      collection: polygons,
+      reducer: ee.Reducer.count(),
+      scale: analysisScaleMeters,
+      tileScale: 2
+    }),
+    polygons.map(function(feature) {
+      return ee.Feature(feature).set("count", 0);
+    })
+  ));
+
+  return attachMatchedProperty(
+    meanStats,
+    validPxStats,
+    "polygon_id",
+    "count",
+    "valid_px"
+  ).map(function(feature) {
+    feature = ee.Feature(feature);
+    var validPx = ee.Number(ee.Algorithms.If(
+      ee.Algorithms.IsEqual(feature.get("valid_px"), null),
+      0,
+      feature.get("valid_px")
+    ));
+
+    return feature.set({
+      polygon_area_sqm: feature.geometry().area(1),
+      image_count: imageCount,
+      valid_px: validPx,
+      has_valid_pixels: validPx.gte(minValidPixels),
+      qa_flag: ee.Algorithms.If(
+        imageCount.eq(0),
+        "no_images",
+        ee.Algorithms.If(validPx.gte(minValidPixels), "ok", "low_valid_px")
+      ),
+      ndssi_mean: feature.get("NDSSI"),
+      egri_mean: feature.get("EGRI"),
+      red_turbidity_proxy_mean: feature.get("RED_TURBIDITY_PROXY"),
+      hossain_red_ntu_proxy_mean: feature.get("HOSSAIN_RED_NTU_PROXY"),
+      per_image_valid_count: imageCount,
+      month_label: config.title,
+      month_key: config.label,
+      analysis_date: config.label,
+      scene_label: config.title,
+      window_start: monthStart.format("YYYY-MM-dd"),
+      window_end_exclusive: monthEnd.format("YYYY-MM-dd")
+    }).select([
+      "polygon_id",
+      "distance_m",
+      "polygon_area_sqm",
+      "image_count",
+      "valid_px",
+      "has_valid_pixels",
+      "qa_flag",
+      "ndssi_mean",
+      "egri_mean",
+      "red_turbidity_proxy_mean",
+      "hossain_red_ntu_proxy_mean",
+      "per_image_valid_count",
+      "month_label",
+      "month_key",
+      "analysis_date",
+      "scene_label",
+      "window_start",
+      "window_end_exclusive"
+    ]);
+  }).sort("distance_m");
 }
 
 function normalizeByImpactPool(fc, groupProperty, valueProperty, outputProperty) {
@@ -345,37 +338,38 @@ print("EGRI formula", "Green / Red");
 print("Red turbidity proxy", "Red surface reflectance");
 print("Hossain red-band proxy", "2677.2 * pow(red, 1.8562); exploratory, not locally calibrated");
 
+var s2Base = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+  .filterBounds(aoi)
+  .filterDate(
+    ee.Date.fromYMD(analysisStartYear, analysisMonths[0], 1),
+    ee.Date.fromYMD(analysisEndYear, analysisMonths[analysisMonths.length - 1], 1)
+      .advance(1, "month")
+  )
+  .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", cloudMax))
+  .map(scaleAndSelectS2)
+  .map(maskS2)
+  .map(addIndices);
+
 function buildMonthSummary(config) {
   var monthStart = config.start;
   var monthEnd = monthStart.advance(1, "month");
 
-  var s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
-    .filterBounds(aoi)
-    .filterDate(monthStart, monthEnd)
-    .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", cloudMax))
-    .map(scaleAndSelectS2)
-    .map(maskS2)
-    .map(addIndices)
-    .sort("system:time_start");
+  var s2 = s2Base.filterDate(monthStart, monthEnd);
 
   var imageCount = s2.size();
   var monthImage = ee.Image(ee.Algorithms.If(
     imageCount.gt(0),
-    s2.median().clip(aoi),
+    s2.median(),
     makeEmptyAnalysisImage()
   ));
 
-  var polygonStats = polygons.map(function(feature) {
-    return summarizePolygon(feature, s2, monthImage, imageCount)
-      .set({
-        month_label: config.title,
-        month_key: config.label,
-        analysis_date: config.label,
-        scene_label: config.title,
-        window_start: monthStart.format("YYYY-MM-dd"),
-        window_end_exclusive: monthEnd.format("YYYY-MM-dd")
-      });
-  }).sort("distance_m");
+  var polygonStats = summarizeMonthlyComposite(
+    monthImage,
+    imageCount,
+    config,
+    monthStart,
+    monthEnd
+  );
 
   var validSignalStats = polygonStats.filter(ee.Filter.gte("valid_px", minValidPixels));
 
@@ -392,12 +386,6 @@ function buildMonthSummary(config) {
 }
 
 // ================= OUTPUTS =================
-Map.setOptions("SATELLITE");
-Map.centerObject(aoi, 15);
-Map.addLayer(polygons, {color: "FFB300"}, "Downstream polygons", true);
-Map.addLayer(toGeometry(upstream_control), {color: "26A69A"}, "upstream_control", true);
-Map.addLayer(toGeometry(impact_pool), {color: "FFFF00"}, "impact_pool", true);
-
 var analysisConfigs = buildAnalysisConfigs(analysisStartYear, analysisEndYear, analysisMonths);
 print("Analysis windows", analysisConfigs);
 
@@ -464,19 +452,7 @@ var monthlyExportStats = attachMatchedProperty(
   });
 });
 
-monthSummaries.forEach(function(summary, idx) {
-  Map.addLayer(
-    summary.monthImage.select(["red", "green", "blue"]),
-    {min: 0.02, max: 0.3},
-    summary.title + " RGB",
-    idx === 0
-  );
-  Map.addLayer(
-    summary.monthImage.select("NDSSI"),
-    {min: -0.4, max: 0.4, palette: ["#7B3294", "#F7F7F7", "#008837"]},
-    summary.title + " NDSSI",
-    false
-  );
+monthSummaries.forEach(function(summary) {
   print(summary.title + " window", summary.monthStart.format("YYYY-MM-dd"), summary.monthEnd.format("YYYY-MM-dd"));
   print(summary.title + " image count", summary.imageCount);
   print(summary.title + " exportable polygon rows", summary.validSignalStats.size());
