@@ -45,6 +45,7 @@ var analysisScalePlanetMeters = 5;
 var aoiBufferMeters = 250;
 var upstreamReferenceDistanceMeters = -500;
 var minValidPixels = 3;
+var maxSentinelScenesPerMonth = 3;
 var summaryTileScale = 4;
 var reduceRegionMaxPixels = 1e9;
 var requirePlanetUdmClearMask = true;
@@ -172,6 +173,10 @@ function safeNumber(x) {
   return ee.Number(ee.Algorithms.If(ee.Algorithms.IsEqual(x, null), noDataValue, x));
 }
 
+function safeText(x) {
+  return ee.String(ee.Algorithms.If(ee.Algorithms.IsEqual(x, null), "", x));
+}
+
 function buildPolygons() {
   var polygonFeatures = [
     ee.Feature(toGeometry(upstream_control), {
@@ -271,19 +276,20 @@ function normalizeByImpactPool(fc, groupProperty, valueProperty, outputProperty)
     var baselineFeature = ee.Feature(groupFc.filter(ee.Filter.eq("polygon_id", "impact_pool")).first());
     var baselineRaw = baselineFeature.get(valueProperty);
     var baselineValue = ee.Number(baselineRaw);
+    var baselineIsValid = ee.Boolean(ee.Algorithms.IsEqual(baselineRaw, null)).not()
+      .and(baselineValue.neq(noDataValue))
+      .and(baselineValue.neq(0));
 
     return groupFc.map(function(feature) {
       feature = ee.Feature(feature);
       var valueRaw = feature.get(valueProperty);
       var value = ee.Number(valueRaw);
+      var valueIsValid = ee.Boolean(ee.Algorithms.IsEqual(valueRaw, null)).not()
+        .and(value.neq(noDataValue));
       var normalizedValue = ee.Algorithms.If(
-        ee.Algorithms.IsEqual(baselineRaw, null),
-        null,
-        ee.Algorithms.If(
-          ee.Algorithms.IsEqual(valueRaw, null),
-          null,
-          ee.Algorithms.If(baselineValue.neq(0), value.divide(baselineValue), null)
-        )
+        baselineIsValid.and(valueIsValid),
+        value.divide(baselineValue),
+        noDataValue
       );
       return feature.set(outputProperty, normalizedValue);
     });
@@ -332,7 +338,7 @@ function addRelativeFields(fc, groupProperty) {
 
 function selectExportFields(fc) {
   return fc.map(function(feature) {
-    return ee.Feature(feature).select(exportFieldOrder);
+    return ee.Feature(feature).select(exportFieldOrder, exportFieldOrder, false);
   });
 }
 
@@ -439,7 +445,7 @@ function summarizeImageToPolygons(image, polygons, config) {
       scene_label: config.scene_label,
       image_label: config.image_label,
       analysis_date: config.analysis_date,
-      acquisition_date: config.acquisition_date,
+      acquisition_date: safeText(config.acquisition_date),
       analysis_year: config.analysis_year,
       analysis_month: config.analysis_month,
       month_key: config.month_key,
@@ -457,15 +463,15 @@ function summarizeImageToPolygons(image, polygons, config) {
         "no_images",
         ee.Algorithms.If(validPx.gte(minValidPixels), "ok", "low_valid_px")
       ),
-      blue_mean: feature.get("blue"),
-      green_mean: feature.get("green"),
-      red_mean: feature.get("red"),
-      nir_mean: feature.get("nir"),
-      ndssi_mean: feature.get("NDSSI"),
-      egri_mean: feature.get("EGRI"),
-      ndti_mean: feature.get("NDTI"),
-      red_turbidity_proxy_mean: feature.get("RED_TURBIDITY_PROXY"),
-      hossain_red_ntu_proxy_mean: feature.get("HOSSAIN_RED_NTU_PROXY")
+      blue_mean: safeNumber(feature.get("blue")),
+      green_mean: safeNumber(feature.get("green")),
+      red_mean: safeNumber(feature.get("red")),
+      nir_mean: safeNumber(feature.get("nir")),
+      ndssi_mean: safeNumber(feature.get("NDSSI")),
+      egri_mean: safeNumber(feature.get("EGRI")),
+      ndti_mean: safeNumber(feature.get("NDTI")),
+      red_turbidity_proxy_mean: safeNumber(feature.get("RED_TURBIDITY_PROXY")),
+      hossain_red_ntu_proxy_mean: safeNumber(feature.get("HOSSAIN_RED_NTU_PROXY"))
     }).select(exportFieldOrder);
   }).sort("distance_m");
 }
@@ -521,6 +527,7 @@ print("AOI", aoi);
 print("Polygon count", polygons.size());
 print("Max downstream distance (m)", polygons.aggregate_max("distance_m"));
 print("Minimum valid pixels", minValidPixels);
+print("Max Sentinel scenes per month", maxSentinelScenesPerMonth);
 print("AOI buffer (m)", aoiBufferMeters);
 print("Summary tileScale", summaryTileScale);
 print("reduceRegion maxPixels", reduceRegionMaxPixels);
@@ -602,7 +609,10 @@ var sentinelBase = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
 function buildSentinelMonthSummary(config) {
   var monthStart = config.start;
   var monthEnd = monthStart.advance(1, "month");
-  var col = sentinelBase.filterDate(monthStart, monthEnd);
+  var col = sentinelBase
+    .filterDate(monthStart, monthEnd)
+    .sort("aoi_clear_fraction", false)
+    .limit(maxSentinelScenesPerMonth);
   var imageCount = col.size();
   var monthImage = ee.Image(ee.Algorithms.If(
     imageCount.gt(0),
