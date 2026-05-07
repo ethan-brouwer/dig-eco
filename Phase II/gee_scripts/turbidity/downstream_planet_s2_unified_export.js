@@ -276,25 +276,26 @@ function normalizeByImpactPool(fc, groupProperty, valueProperty, outputProperty)
     var baselineFeature = ee.Feature(groupFc.filter(ee.Filter.eq("polygon_id", "impact_pool")).first());
     var baselineRaw = baselineFeature.get(valueProperty);
     var baselineValue = ee.Number(baselineRaw);
-    var baselineIsValid = ee.Algorithms.If(
-      ee.Algorithms.IsEqual(baselineRaw, null),
-      false,
-      baselineValue.neq(noDataValue).and(baselineValue.neq(0))
-    );
-
     return groupFc.map(function(feature) {
       feature = ee.Feature(feature);
       var valueRaw = feature.get(valueProperty);
       var value = ee.Number(valueRaw);
-      var valueIsValid = ee.Algorithms.If(
-        ee.Algorithms.IsEqual(valueRaw, null),
-        false,
-        value.neq(noDataValue)
-      );
       var normalizedValue = ee.Algorithms.If(
-        baselineIsValid.and(valueIsValid),
-        value.divide(baselineValue),
-        noDataValue
+        ee.Algorithms.IsEqual(baselineRaw, null),
+        noDataValue,
+        ee.Algorithms.If(
+          baselineValue.eq(noDataValue).or(baselineValue.eq(0)),
+          noDataValue,
+          ee.Algorithms.If(
+            ee.Algorithms.IsEqual(valueRaw, null),
+            noDataValue,
+            ee.Algorithms.If(
+              value.eq(noDataValue),
+              noDataValue,
+              value.divide(baselineValue)
+            )
+          )
+        )
       );
       return feature.set(outputProperty, normalizedValue);
     });
