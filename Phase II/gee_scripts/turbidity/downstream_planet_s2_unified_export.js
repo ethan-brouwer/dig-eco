@@ -108,6 +108,19 @@ var planetScenes = [
       "projects/metalminingpersonalcopy/assets/1645310_2012-03-18_RE4_3A_udm_clip_all",
       "projects/metalminingpersonalcopy/assets/1645311_2012-03-18_RE4_3A_udm_clip_all"
     ]
+  },
+  {
+    label: "PlanetScope PS2 2017-05-29",
+    sensor: "PlanetScope PS2",
+    acquisitionDate: "2017-05-29",
+    srAssetIds: [
+      "projects/metalminingpersonalcopy/assets/20170529_153405_0f34_3B_AnalyticMS_SR_clip",
+      "projects/metalminingpersonalcopy/assets/20170529_153406_0f34_3B_AnalyticMS_SR_clip"
+    ],
+    udmAssetIds: [
+      "projects/metalminingpersonalcopy/assets/20170529_153405_0f34_3B_udm2_clip",
+      "projects/metalminingpersonalcopy/assets/20170529_153406_0f34_3B_udm2_clip"
+    ]
   }
 ];
 
@@ -369,6 +382,24 @@ function filterConfiguredPlanetScenes(sceneList) {
   return sceneList.filter(function(scene) {
     return !hasPlaceholderAsset(scene);
   });
+}
+
+function makePlanetSrImage(assetId, sensor) {
+  var img = ee.Image(assetId);
+  return ee.Image(ee.Algorithms.If(
+    ee.String(sensor).compareTo("PlanetScope PS2").eq(0),
+    img.select([0, 1, 2, 3], ["blue", "green", "red", "nir"]).addBands(ee.Image.constant(noDataValue).rename("red_edge")),
+    img.select([0, 1, 2, 3, 4], ["blue", "green", "red", "red_edge", "nir"])
+  )).multiply(0.0001);
+}
+
+function makePlanetClearMask(assetId) {
+  var assetIdString = ee.String(assetId);
+  return ee.Image(ee.Algorithms.If(
+    assetIdString.match("udm2").length(),
+    ee.Image(assetId).select([0]).eq(1),
+    ee.Image(assetId).select([0]).eq(0)
+  ));
 }
 
 function emptyAnalysisImage() {
@@ -659,12 +690,10 @@ if (exportSentinelCsv || exportCombinedCsv) {
 function makePlanetImage(scene) {
   var sceneDate = ee.Date(scene.acquisitionDate);
   var srImages = scene.srAssetIds.map(function(assetId) {
-    return ee.Image(assetId)
-      .select([0, 1, 2, 3, 4], ["blue", "green", "red", "red_edge", "nir"])
-      .multiply(0.0001);
+    return makePlanetSrImage(assetId, scene.sensor);
   });
   var udmMasks = scene.udmAssetIds.map(function(assetId) {
-    return ee.Image(assetId).select([0], ["UDM"]).eq(0);
+    return makePlanetClearMask(assetId);
   });
 
   var srMosaic = ee.ImageCollection.fromImages(srImages).mosaic();
