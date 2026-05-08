@@ -22,16 +22,16 @@
   - Poly10000m
 
   OUTPUT
-  - One CSV export with monthly median blue/red values per polygon.
+  - One CSV export with monthly median blue/green/red values per polygon.
   - One in-GEE annual NDTI preview chart with one line per year.
 
   NOTES
   - This script keeps the load light by:
     1. using Sentinel-2 only,
     2. limiting each month to the 3 least-cloudy scenes,
-    3. exporting only red/blue medians plus small metadata.
-  - The preview NDTI here is based on RED and BLUE:
-      (red_median - blue_median) / (red_median + blue_median)
+    3. exporting only blue/green/red medians plus small metadata.
+  - The preview NDTI here matches the existing project workflow:
+      (red_median - green_median) / (red_median + green_median)
 */
 
 // ================= USER SETTINGS =================
@@ -75,7 +75,7 @@ function maskS2(img) {
 }
 
 function scaleAndSelectS2(img) {
-  return img.select(["B2", "B4"], ["blue", "red"])
+  return img.select(["B2", "B3", "B4"], ["blue", "green", "red"])
     .multiply(0.0001)
     .copyProperties(img, ["system:time_start", "CLOUDY_PIXEL_PERCENTAGE"]);
 }
@@ -116,6 +116,7 @@ function makeEmptyFeature(monthStart, feature, qaFlag) {
     image_count_used: 0,
     qa_flag: qaFlag,
     blue_median: noDataValue,
+    green_median: noDataValue,
     red_median: noDataValue
   });
 }
@@ -181,7 +182,7 @@ var monthlyLong = ee.FeatureCollection(monthlyStarts.map(function(monthStart) {
   var monthComposite = ee.Image(ee.Algorithms.If(
     usedCount.gt(0),
     monthTop.median().clip(aoi),
-    ee.Image.constant([0, 0]).rename(["blue", "red"]).selfMask()
+    ee.Image.constant([0, 0, 0]).rename(["blue", "green", "red"]).selfMask()
   ));
 
   return polygons.map(function(feature) {
@@ -198,11 +199,16 @@ var monthlyLong = ee.FeatureCollection(monthlyStarts.map(function(monthStart) {
       });
 
       var blueMedian = safeNumber(stats.get("blue"));
+      var greenMedian = safeNumber(stats.get("green"));
       var redMedian = safeNumber(stats.get("red"));
       var hasData = ee.Algorithms.If(
         blueMedian.eq(noDataValue),
         false,
-        ee.Algorithms.If(redMedian.eq(noDataValue), false, true)
+        ee.Algorithms.If(
+          greenMedian.eq(noDataValue),
+          false,
+          ee.Algorithms.If(redMedian.eq(noDataValue), false, true)
+        )
       );
 
       return ee.Feature(null, {
@@ -216,6 +222,7 @@ var monthlyLong = ee.FeatureCollection(monthlyStarts.map(function(monthStart) {
         image_count_used: usedCount,
         qa_flag: ee.Algorithms.If(hasData, "ok", "no_valid_pixels"),
         blue_median: blueMedian,
+        green_median: greenMedian,
         red_median: redMedian
       });
     })(), makeEmptyFeature(monthStart, feature, "no_images")));
@@ -226,20 +233,20 @@ print("Monthly export table", monthlyLong.limit(25));
 
 // ================= PREVIEW CHART: ONE LINE PER YEAR =================
 var monthlyForPreview = monthlyLong.map(function(f) {
-  var blue = ee.Number(f.get("blue_median"));
+  var green = ee.Number(f.get("green_median"));
   var red = ee.Number(f.get("red_median"));
   var valid = ee.Algorithms.If(
-    blue.eq(noDataValue),
+    green.eq(noDataValue),
     false,
     ee.Algorithms.If(
       red.eq(noDataValue),
       false,
-      ee.Algorithms.If(red.add(blue).eq(0), false, true)
+      ee.Algorithms.If(red.add(green).eq(0), false, true)
     )
   );
   var ndtiPreview = ee.Algorithms.If(
     valid,
-    red.subtract(blue).divide(red.add(blue)),
+    red.subtract(green).divide(red.add(green)),
     null
   );
   return ee.Feature(f).set("ndti_rb_preview", ndtiPreview);
@@ -311,6 +318,7 @@ Export.table.toDrive({
     "image_count_used",
     "qa_flag",
     "blue_median",
+    "green_median",
     "red_median"
   ]
 });
